@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+logs/
+.DS_Store
+history.csv
+last_run.json
+dashboard.html
+alerts.json
+*.log
