@@ -324,9 +324,15 @@
       scales: { x: { ticks: { color: "#8b9aab", maxTicksLimit: 8 }, grid: { color: "#243041" } },
                 y: { ticks: { color: "#8b9aab" }, grid: { color: "#243041" } } } };
     function line(id, datasets, extraY) {
+      const canvas = document.getElementById(id);
+      const has = datasets.some(ds => (ds.data || []).some(v => v !== null && v !== undefined && !Number.isNaN(v)));
+      if (!has) {
+        canvas.parentElement.innerHTML = '<p class="muted">No series yet. IBIT daily needs SOSOVALUE_API_KEY or a Farside session that is not behind Cloudflare. mNAV/holdings fill in as history.csv grows.</p>';
+        return;
+      }
       const opts = JSON.parse(JSON.stringify(common));
       if (extraY) opts.scales.y1 = extraY;
-      new Chart(document.getElementById(id), { type: "line", data: { labels, datasets }, options: opts });
+      new Chart(canvas, { type: "line", data: { labels, datasets }, options: opts });
     }
     const mk = (label, key, color, yAxisID) => ({
       label, data: num(key), borderColor: color, backgroundColor: "transparent",
