@@ -259,23 +259,26 @@
       ["US ETF 7d", q.etf_flow_7d_musd, 0, " $m", null, true],
       ["IBIT basket", q.ibit_basket_btc, 2, " BTC", null, false],
       ["IBIT prem/NAV", q.ibit_prem_pct, 2, "%", null, false],
-      ["Broker news", q.broker_restriction_hits, 0, "", null, false],
+      ["Broker news", q.broker_restriction_hits ?? 0, 0, " hits", null, false],
       ["MSTR mNAV", q.mstr_mnav, 3, "x", q.mstr_prem_pct, false, "%"],
       ["Strategy BTC", q.strategy_btc, 0, "", q.strategy_btc_qtd, true, " QTD"],
       ["Strategy sold QTD", q.strategy_sold_qtd, 0, " BTC", null, false],
     ];
     const status = (q.ibit_creation_status || "unknown").toLowerCase();
+    const tile = (t) => `<div class="kpi">
+        <div class="label">${t[0]}</div>
+        <div class="val">${fmt(t[1], t[2], t[3])}</div>
+        ${t[4] !== null && t[4] !== undefined && t[4] !== "" ? chg(t[4], t[6] || "", t[5]) : ""}
+      </div>`;
     const statusHtml = `<div class="kpi">
         <div class="label">IBIT creation</div>
         <div class="val status-${status}">${status}</div>
         <div class="chg muted">BlackRock daily basket</div>
       </div>`;
-    document.getElementById("plumbing-kpis").innerHTML = plumbing.map(t => `
-      <div class="kpi">
-        <div class="label">${t[0]}</div>
-        <div class="val">${fmt(t[1], t[2], t[3])}</div>
-        ${t[4] !== null && t[4] !== undefined && t[4] !== "" ? chg(t[4], t[6] || "", t[5]) : ""}
-      </div>`).join("") + statusHtml;
+    // Keep the IBIT gate tiles together: basket, prem, creation, broker news.
+    const [exch, flow, etf7, basket, prem, news, ...rest] = plumbing;
+    document.getElementById("plumbing-kpis").innerHTML =
+      [exch, flow, etf7, basket, prem].map(tile).join("") + statusHtml + [news, ...rest].map(tile).join("");
 
     const newsHits = ((SNAPSHOT.broker_news || {}).hits) || [];
     const newsEl = document.getElementById("broker-news");
@@ -369,6 +372,8 @@
         canvas.parentElement.innerHTML = '<p class="muted">' + (emptyNote || "No series yet. Charts fill in as history.csv grows.") + "</p>";
         return;
       }
+      const nPoints = datasets.reduce((acc, ds) => acc + (ds.data || []).filter(v => v !== null && v !== undefined && !Number.isNaN(v)).length, 0);
+      if (nPoints < 8) datasets.forEach(ds => { ds.pointRadius = 3; });
       const opts = JSON.parse(JSON.stringify(common));
       if (extraY) opts.scales.y1 = extraY;
       new Chart(canvas, { type: "line", data: { labels, datasets }, options: opts });
