@@ -51,6 +51,9 @@ Exit codes for wrapping: `0` all-clear or watch, `1` Phase 2, `2` Phase 3.
 | BTC + 24h volume | CoinGecko |
 | Exchange BTC reserves | CoinMetrics `SplyExNtv` (Glassnode/CryptoQuant class). Optional `GLASSNODE_API_KEY` / `CRYPTOQUANT_API_KEY` |
 | IBIT daily flows | Farside scrape + optional `SOSOVALUE_API_KEY`. Strategy 7d US-ETF print as backup |
+| IBIT creation basket / NAV | [iShares IBIT Key Facts](https://www.ishares.com/us/products/333011/ishares-bitcoin-trust-etf) daily basket BTC. Empty or suspended = the gate |
+| IBIT premium/discount | Live last (Yahoo / Nasdaq) vs official NAV. Official close prem from the same iShares page |
+| Broker BTC-ETF restrictions | Google News RSS watch for Robinhood / Schwab / Fidelity policy changes |
 | MSTR mNAV, Strategy BTC, QTD sales | [Strategy treasury API](https://api.strategy.com/btc/bitcoinKpis) |
 | 10Y / 30Y bid-to-cover, tail | [Treasury Fiscal Data auctions](https://fiscaldata.treasury.gov/datasets/treasury-securities-auctions-data/treasury-securities-auctions-data) (TIPS/FRNs stripped) |
 
@@ -63,6 +66,8 @@ Tail = high yield − median yield, in basis points. A failed auction is bid-to-
 - UST 30Y > 5.0% (buybacks not holding the long end)
 - USD/JPY > 170 or < 145 (volatility, not direction)
 - Last 3 coupon auctions average bid-to-cover < 2.3x
+- IBIT premium vs NAV ≥ 20%
+- Robinhood / Schwab / Fidelity BTC-ETF restriction headlines
 
 **Phase 2 — Cracking (Alert)**
 - JGB 40Y > 5.0% with a 20bps+ daily move
@@ -71,12 +76,15 @@ Tail = high yield − median yield, in basis points. A failed auction is bid-to-
 - DXY breaks 95
 - Gold and BTC both rising while DXY falls
 - USD/JPY ≥ 180 or ≤ 140
+- IBIT creation basket empty or suspended (BlackRock daily CU)
+- IBIT premium vs NAV ≥ 30%
 
 **Phase 3 — Musical Chairs (Action)**
 - Coupon auction tail > 5bps in the last 14 days, or a failed auction
 - DXY < 90
 - Gold gaps > 3% in a day
 - BTC/gold breaks 30 oz with volume
+- IBIT creation closed **and** premium ≥ 20% (the gate is shut and the tape is showing it)
 
 Edit `thresholds.json` rather than the Python. 30-year tails of 5–8bps happen in ordinary refundings; the 14-day lookback stops a three-week-old print from putting you in Action Mode.
 

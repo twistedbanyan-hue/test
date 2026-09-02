@@ -11,6 +11,8 @@ Free sources, no API keys required:
   Exchange reserves — CoinMetrics SplyExNtv (Glassnode/CryptoQuant class);
                       optional GLASSNODE_API_KEY / CRYPTOQUANT_API_KEY
   IBIT daily flows — Farside scrape, optional SOSOVALUE_API_KEY, Strategy 7d ETF print
+  IBIT creation gate — iShares daily basket BTC + NAV; Yahoo/Nasdaq last vs NAV
+  Broker BTC-ETF restrictions — Google News RSS (Robinhood / Schwab / Fidelity)
   MSTR mNAV / sales — Strategy treasury API (api.strategy.com/btc/bitcoinKpis)
 """
 
@@ -25,7 +27,7 @@ import re
 import sys
 import time
 import xml.etree.ElementTree as ET
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -72,6 +74,13 @@ HISTORY_FIELDS = [
     "strategy_btc",
     "strategy_btc_qtd",
     "strategy_sold_qtd",
+    "ibit_nav",
+    "ibit_px",
+    "ibit_prem_pct",
+    "ibit_official_prem_pct",
+    "ibit_basket_btc",
+    "ibit_creation_status",
+    "broker_restriction_hits",
     "phase",
 ]
 
@@ -607,6 +616,254 @@ def fetch_ibit_flows() -> dict[str, Any]:
     return {"latest": {}, "history": [], "source": None, "errors": [note]}
 
 
+IBIT_PRODUCT_URL = "https://www.ishares.com/us/products/333011/ishares-bitcoin-trust-etf"
+_CREATION_SUSPEND_RE = re.compile(
+    r"(creations?\s+(?:and|&)\s+redemptions?|creation/?redemption|creation units?).{0,80}"
+    r"(suspend|halted|halt|paused|closed|unavailable)|"
+    r"(suspend|halted|halt|paused).{0,80}"
+    r"(creations?\s+(?:and|&)\s+redemptions?|creation/?redemption|creation units?)",
+    re.I | re.S,
+)
+_BROKER_NAMES = (
+    "robinhood",
+    "schwab",
+    "fidelity",
+    "e*trade",
+    "etrade",
+    "vanguard",
+    "td ameritrade",
+    "webull",
+    "interactive brokers",
+)
+_BTC_ETF_TERMS = ("ibit", "bitcoin etf", "btc etf", "spot bitcoin", "crypto etf")
+_RESTRICT_TERMS = (
+    "restrict",
+    "restriction",
+    "halt",
+    "suspend",
+    "block",
+    "pause",
+    "ban",
+    "prohibit",
+    "disable",
+    "no longer allow",
+    "stop allowing",
+    "barred",
+    "blocked purchases",
+)
+
+
+def _decode_ishares(html: str) -> str:
+    return html.replace("&quot;", '"').replace("&#x27;", "'").replace("&amp;", "&")
+
+
+def _ishares_field(html: str, key: str) -> dict[str, str]:
+    """Pull formattedValue / as-of from an iShares productData object."""
+    m = re.search(rf'"{re.escape(key)}"\s*:\s*\{{([^{{}}]{{0,4000}})\}}', html)
+    blob = m.group(1) if m else ""
+    if not blob:
+        m = re.search(
+            rf'"name"\s*:\s*"{re.escape(key)}"[^}}]{{0,500}}"formattedValue"\s*:\s*"([^"]*)"',
+            html,
+        )
+        if not m:
+            return {}
+        asof = re.search(
+            rf'"name"\s*:\s*"{re.escape(key)}"[^}}]{{0,500}}"formattedAsOfDate"\s*:\s*(?:"([^"]*)"|null)',
+            html,
+        )
+        out = {"formattedValue": m.group(1)}
+        if asof and asof.group(1):
+            out["formattedAsOfDate"] = asof.group(1)
+        return out
+    out: dict[str, str] = {}
+    for field in ("formattedValue", "formattedAsOfDate", "label", "visible"):
+        fm = re.search(rf'"{field}"\s*:\s*(?:"([^"]*)"|(true|false|null))', blob)
+        if fm:
+            out[field] = fm.group(1) if fm.group(1) is not None else fm.group(2)
+    return out
+
+
+def _ishares_number(field: dict[str, str]) -> float | None:
+    raw = (field.get("formattedValue") or "").strip()
+    if not raw or raw.lower() in {"n/a", "na", "null", "none", "-", "—"}:
+        return None
+    raw = raw.replace("$", "").replace("%", "").replace(",", "")
+    return _f(raw)
+
+
+def _creation_status(html: str, basket_btc: float | None, basket_present: bool) -> str:
+    if _CREATION_SUSPEND_RE.search(html):
+        return "suspended"
+    if basket_present and (basket_btc is None or basket_btc <= 0):
+        return "empty"
+    if basket_btc is not None and basket_btc > 0:
+        return "open"
+    return "unknown"
+
+
+def _fetch_ibit_ishares() -> dict[str, Any]:
+    resp = SESSION.get(IBIT_PRODUCT_URL, timeout=25)
+    resp.raise_for_status()
+    html = _decode_ishares(resp.text)
+    nav_f = _ishares_field(html, "navAmount")
+    close_f = _ishares_field(html, "closingPrice")
+    basket_f = _ishares_field(html, "basketAmt")
+    indic_f = _ishares_field(html, "indicativeBasketAmt")
+    prem_f = _ishares_field(html, "premiumDiscountClosingPriceNavPercent")
+    if not nav_f.get("formattedValue"):
+        m = re.search(r'"name"\s*:\s*"NAV as of"\s*,\s*"value"\s*:\s*"([^"]+)"', html)
+        if m:
+            nav_f = {"formattedValue": m.group(1)}
+    nav = _ishares_number(nav_f)
+    closing = _ishares_number(close_f)
+    basket_present = bool(basket_f) or "Basket Bitcoin Amount" in html
+    basket_btc = _ishares_number(basket_f)
+    return {
+        "nav": nav,
+        "closing_price": closing,
+        "official_prem_pct": _ishares_number(prem_f),
+        "basket_btc": basket_btc,
+        "indicative_btc": _ishares_number(indic_f),
+        "as_of": nav_f.get("formattedAsOfDate") or basket_f.get("formattedAsOfDate"),
+        "creation_status": _creation_status(html, basket_btc, basket_present),
+        "source": "ishares.IBIT",
+        "url": IBIT_PRODUCT_URL,
+    }
+
+
+def _fetch_ibit_last() -> dict[str, Any]:
+    errors: list[str] = []
+    try:
+        y = fetch_yahoo("IBIT", "5d")
+        if y.get("price") is not None:
+            return {"price": y["price"], "source": "yahoo.IBIT"}
+        errors.append("yahoo.IBIT: no last")
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"yahoo.IBIT: {exc}")
+    try:
+        payload = get_json(
+            "https://api.nasdaq.com/api/quote/IBIT/info",
+            params={"assetclass": "etf"},
+            extra_headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+                ),
+                "Accept": "application/json, text/plain, */*",
+                "Origin": "https://www.nasdaq.com",
+                "Referer": "https://www.nasdaq.com/market-activity/etf/ibit",
+            },
+            timeout=20,
+        )
+        last = ((payload.get("data") or {}).get("primaryData") or {}).get("lastSalePrice")
+        px = _f(str(last).replace("$", "").replace(",", "")) if last is not None else None
+        if px is not None:
+            return {"price": px, "source": "nasdaq.IBIT"}
+        errors.append("nasdaq.IBIT: no lastSalePrice")
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"nasdaq.IBIT: {exc}")
+    raise RuntimeError("; ".join(errors) or "IBIT last unavailable")
+
+
+def fetch_ibit_gate() -> dict[str, Any]:
+    """BlackRock daily creation basket + premium/discount to NAV."""
+    errors: list[str] = []
+    ishares: dict[str, Any] = {}
+    last: dict[str, Any] = {}
+    try:
+        ishares = _fetch_ibit_ishares()
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"ishares: {exc}")
+    try:
+        last = _fetch_ibit_last()
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"ibit_px: {exc}")
+    nav = ishares.get("nav")
+    px = last.get("price") if last.get("price") is not None else ishares.get("closing_price")
+    official = ishares.get("official_prem_pct")
+    live_prem = None
+    if nav not in (None, 0) and px is not None:
+        live_prem = (px / nav - 1.0) * 100.0
+    elif official is not None:
+        live_prem = official
+    sources = [s for s in (ishares.get("source"), last.get("source")) if s]
+    return {
+        "nav": nav,
+        "px": px,
+        "prem_pct": _round(live_prem, 3),
+        "official_prem_pct": official,
+        "basket_btc": ishares.get("basket_btc"),
+        "indicative_btc": ishares.get("indicative_btc"),
+        "creation_status": ishares.get("creation_status") or "unknown",
+        "as_of": ishares.get("as_of"),
+        "url": IBIT_PRODUCT_URL,
+        "source": "+".join(sources) or None,
+        "errors": errors,
+    }
+
+
+def _restriction_headline(title: str) -> bool:
+    core = title.rsplit(" - ", 1)[0] if " - " in title else title
+    t = core.lower()
+    def has_word(term: str) -> bool:
+        if " " in term or "*" in term:
+            return term in t
+        return re.search(rf"(?<![a-z0-9]){re.escape(term)}", t) is not None
+
+    has_broker = any(has_word(b) for b in _BROKER_NAMES)
+    has_etf = any(e in t for e in _BTC_ETF_TERMS)
+    has_restrict = any(has_word(a) for a in _RESTRICT_TERMS)
+    return has_broker and has_etf and has_restrict
+
+
+def _rss_pub_iso(text: str | None) -> str | None:
+    if not text:
+        return None
+    try:
+        from email.utils import parsedate_to_datetime
+
+        dt = parsedate_to_datetime(text)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc).strftime("%Y-%m-%d")
+    except (TypeError, ValueError, OverflowError):
+        return parse_date(text)
+
+
+def fetch_broker_restriction_news() -> dict[str, Any]:
+    """Google News RSS for brokerage BTC-ETF purchase restrictions (7-day window)."""
+    query = (
+        '("IBIT" OR "bitcoin ETF" OR "BTC ETF") '
+        "(Robinhood OR Schwab OR Fidelity OR Vanguard) "
+        "(restrict OR restriction OR halt OR suspend OR block OR ban OR prohibit OR pause OR \"no longer\")"
+    )
+    xml_text = get_text(
+        "https://news.google.com/rss/search",
+        params={"q": query, "hl": "en-US", "gl": "US", "ceid": "US:en"},
+        timeout=20,
+    )
+    root = ET.fromstring(xml_text.encode("utf-8"))
+    cutoff_iso = (date.today() - timedelta(days=7)).isoformat()
+    hits: list[dict[str, str]] = []
+    for item in root.findall("./channel/item"):
+        title = (item.findtext("title") or "").strip()
+        link = (item.findtext("link") or "").strip()
+        published = _rss_pub_iso(item.findtext("pubDate"))
+        if published and published < cutoff_iso:
+            continue
+        if not title or not _restriction_headline(title):
+            continue
+        hits.append({"title": title, "link": link, "published": published or ""})
+        if len(hits) >= 8:
+            break
+    return {
+        "hits": hits,
+        "source": "news.google.rss",
+        "query": query,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Snapshot + history
 # ---------------------------------------------------------------------------
@@ -676,6 +933,8 @@ def build_snapshot(backfill_days: int = 0) -> dict[str, Any]:
     strategy = grab("strategy", fetch_strategy_kpis)
     reserves = grab("exchange_reserves", fetch_exchange_reserves, 90)
     ibit = grab("ibit_flows", fetch_ibit_flows)
+    ibit_gate = grab("ibit_gate", fetch_ibit_gate)
+    broker_news = grab("broker_news", fetch_broker_restriction_news)
 
     jgb_latest = jgb.get("latest") or {}
     ust_latest = ust.get("latest") or {}
@@ -719,9 +978,19 @@ def build_snapshot(backfill_days: int = 0) -> dict[str, Any]:
         "strategy_sold_qtd": _round(strategy.get("sold_qtd"), 0),
         "strategy_etf_btc": _round(strategy.get("etf_btc_held"), 0),
         "strategy_exchange_btc": _round(strategy.get("exchange_supply"), 0),
+        "ibit_nav": _round(ibit_gate.get("nav"), 4),
+        "ibit_px": _round(ibit_gate.get("px"), 4),
+        "ibit_prem_pct": _round(ibit_gate.get("prem_pct"), 3),
+        "ibit_official_prem_pct": _round(ibit_gate.get("official_prem_pct"), 3),
+        "ibit_basket_btc": _round(ibit_gate.get("basket_btc"), 4),
+        "ibit_indicative_btc": _round(ibit_gate.get("indicative_btc"), 4),
+        "ibit_creation_status": ibit_gate.get("creation_status") or "unknown",
+        "broker_restriction_hits": len((broker_news or {}).get("hits") or []),
     }
     if ibit.get("errors"):
         errors.extend(ibit["errors"])
+    if ibit_gate.get("errors"):
+        errors.extend(ibit_gate["errors"])
     changes = {
         "jgb_40y_bps": _round(_bps(jgb_latest.get("jgb_40y"), jgb_prev_40), 2),
         "ust_30y_bps": _round(_bps(ust_latest.get("ust_30y"), ust_prev_30), 2),
@@ -744,6 +1013,8 @@ def build_snapshot(backfill_days: int = 0) -> dict[str, Any]:
         "strategy": strategy or {},
         "exchange_reserves": {k: v for k, v in (reserves or {}).items() if k != "history"},
         "ibit": {k: v for k, v in (ibit or {}).items() if k != "history"},
+        "ibit_gate": ibit_gate or {},
+        "broker_news": broker_news or {},
         "sources": sources,
         "errors": errors,
         "series": {
@@ -813,6 +1084,13 @@ def upsert_history(snapshot: dict[str, Any], phase: int | None = None) -> None:
         "strategy_btc": q.get("strategy_btc"),
         "strategy_btc_qtd": q.get("strategy_btc_qtd"),
         "strategy_sold_qtd": q.get("strategy_sold_qtd"),
+        "ibit_nav": q.get("ibit_nav"),
+        "ibit_px": q.get("ibit_px"),
+        "ibit_prem_pct": q.get("ibit_prem_pct"),
+        "ibit_official_prem_pct": q.get("ibit_official_prem_pct"),
+        "ibit_basket_btc": q.get("ibit_basket_btc"),
+        "ibit_creation_status": q.get("ibit_creation_status"),
+        "broker_restriction_hits": q.get("broker_restriction_hits"),
         "phase": phase if phase is not None else "",
     }
     existing = read_history()
@@ -948,6 +1226,20 @@ def print_snapshot(snapshot: dict[str, Any]) -> None:
     ibit_flow = q.get("ibit_flow_musd")
     line("IBIT flow", ibit_flow, " $m" if ibit_flow is not None else "")
     line("US ETF 7d", q.get("etf_flow_7d_musd"), " $m")
+    basket = q.get("ibit_basket_btc")
+    status = q.get("ibit_creation_status") or "unknown"
+    if basket is not None:
+        print(f"  {'IBIT basket':<18} {basket} BTC/CU  ({status})")
+    else:
+        print(f"  {'IBIT basket':<18} —  ({status})")
+    prem = q.get("ibit_prem_pct")
+    official = q.get("ibit_official_prem_pct")
+    extra = f"  (official {official:+.2f}%)" if official is not None else ""
+    if prem is not None:
+        print(f"  {'IBIT prem/NAV':<18} {prem:+.3f}%{extra}")
+    news_n = q.get("broker_restriction_hits")
+    if news_n is not None:
+        print(f"  {'Broker ETF news':<18} {int(news_n)} hit{'s' if int(news_n) != 1 else ''}")
     mnav = q.get("mstr_mnav")
     prem = q.get("mstr_prem_pct")
     extra = f"  ({'+' if prem and prem > 0 else ''}{prem}%)" if prem is not None else ""
@@ -1001,7 +1293,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         jgb_hist_days, do_backfill = 0, False
 
-    print("Pulling JGB, UST, FX, gold, BTC, auctions, Strategy, exchange reserves, IBIT...")
+    print("Pulling JGB, UST, FX, gold, BTC, auctions, Strategy, exchange reserves, IBIT gate...")
     snapshot = build_snapshot(backfill_days=jgb_hist_days)
     print_snapshot(snapshot)
 

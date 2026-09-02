@@ -29,6 +29,8 @@ Do this once a week, same day, same sitting. Fifteen minutes.
 ## 6. BTC plumbing
 - [Glassnode exchange balance](https://studio.glassnode.com/metrics?a=BTC&m=distribution.BalanceExchanges) / [CryptoQuant exchange reserve](https://cryptoquant.com/asset/btc/chart/exchange-flows/exchange-reserve)
 - [SoSoValue US BTC ETF](https://sosovalue.com/assets/etf/us-btc-spot) / [Farside IBIT](https://farside.co.uk/BTC/)
+- [iShares IBIT Key Facts](https://www.ishares.com/us/products/333011/ishares-bitcoin-trust-etf) — daily **creation basket BTC**. Empty or suspended is the gate. Premium/discount of **+20% / +30%** vs NAV means creation is probably choked.
+- Brokerage restrictions (harder): watch Robinhood / Schwab / Fidelity policy headlines on BTC ETF purchases. The dashboard RSS watch is a hint, not a print.
 - [Strategy ledger](https://www.strategy.com/ledger) — mNAV and QTD BTC acquired. Negative QTD means they sold.
 
 ## How to read a print

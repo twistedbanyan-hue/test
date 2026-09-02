@@ -85,6 +85,11 @@
     .sc p { color: var(--muted); font-size: 12px; margin: 8px 0 0; }
     .checks a { color: var(--blue); text-decoration: none; }
     .checks a:hover { text-decoration: underline; }
+    .news a { color: var(--text); text-decoration: none; }
+    .news a:hover { color: var(--blue); }
+    .status-open { color: var(--green); }
+    .status-empty, .status-suspended { color: var(--red); font-weight: 600; }
+    .status-unknown { color: var(--muted); }
     .checks li { margin: 6px 0; }
     .muted { color: var(--muted); }
     footer { color: var(--muted); font-size: 11px; margin-top: 28px; }
@@ -96,7 +101,7 @@
   <header>
     <div>
       <h1>DEBT <span>TRACKER</span></h1>
-      <div class="meta">JGB · UST · DXY · USD/JPY · Gold · BTC · Exchanges · IBIT · Strategy — generated __GENERATED__</div>
+      <div class="meta">JGB · UST · DXY · USD/JPY · Gold · BTC · Exchanges · IBIT gate · Strategy — generated __GENERATED__</div>
     </div>
     <div id="phase-badge" class="phase-badge p0">—</div>
   </header>
@@ -128,6 +133,16 @@
       <div>
         <h2>IBIT daily flow ($m)</h2>
         <div class="card"><canvas id="chart-ibit"></canvas></div>
+      </div>
+    </div>
+    <div class="grid-2-eq">
+      <div>
+        <h2>IBIT premium / discount to NAV (%)</h2>
+        <div class="card"><canvas id="chart-ibit-prem"></canvas></div>
+      </div>
+      <div>
+        <h2>Brokerage BTC ETF restrictions (7d news)</h2>
+        <div class="card news" id="broker-news"></div>
       </div>
     </div>
     <div class="grid-2-eq">
@@ -183,6 +198,8 @@
             <a href="https://cryptoquant.com/asset/btc/chart/exchange-flows/exchange-reserve" target="_blank" rel="noopener">CryptoQuant reserve</a> — coins coming back to sell.</li>
         <li><a href="https://sosovalue.com/assets/etf/us-btc-spot" target="_blank" rel="noopener">SoSoValue BTC ETF flows</a> /
             <a href="https://farside.co.uk/BTC/" target="_blank" rel="noopener">Farside IBIT</a> — IBIT is the whale.</li>
+        <li><a href="https://www.ishares.com/us/products/333011/ishares-bitcoin-trust-etf" target="_blank" rel="noopener">iShares IBIT Key Facts</a> —
+            daily creation basket BTC. Empty or suspended is the gate. Premium/discount: +20% / +30% means creation is choked.</li>
         <li><a href="https://www.strategy.com/ledger" target="_blank" rel="noopener">Strategy bitcoin ledger</a> — mNAV and any QTD sale. If they sell, the structural bid is gone.</li>
       </ol>
       <p class="muted">The script is the edge on hours. The weekly read is the edge on regime. Do both.</p>
@@ -240,16 +257,34 @@
       ["Exch. BTC", q.exchange_btc, 0, "", c.exchange_btc_chg, false, " BTC"],
       ["IBIT flow", q.ibit_flow_musd, 1, " $m", null, true],
       ["US ETF 7d", q.etf_flow_7d_musd, 0, " $m", null, true],
+      ["IBIT basket", q.ibit_basket_btc, 2, " BTC", null, false],
+      ["IBIT prem/NAV", q.ibit_prem_pct, 2, "%", null, false],
+      ["Broker news", q.broker_restriction_hits, 0, "", null, false],
       ["MSTR mNAV", q.mstr_mnav, 3, "x", q.mstr_prem_pct, false, "%"],
       ["Strategy BTC", q.strategy_btc, 0, "", q.strategy_btc_qtd, true, " QTD"],
       ["Strategy sold QTD", q.strategy_sold_qtd, 0, " BTC", null, false],
     ];
+    const status = (q.ibit_creation_status || "unknown").toLowerCase();
+    const statusHtml = `<div class="kpi">
+        <div class="label">IBIT creation</div>
+        <div class="val status-${status}">${status}</div>
+        <div class="chg muted">BlackRock daily basket</div>
+      </div>`;
     document.getElementById("plumbing-kpis").innerHTML = plumbing.map(t => `
       <div class="kpi">
         <div class="label">${t[0]}</div>
         <div class="val">${fmt(t[1], t[2], t[3])}</div>
         ${t[4] !== null && t[4] !== undefined && t[4] !== "" ? chg(t[4], t[6] || "", t[5]) : ""}
-      </div>`).join("");
+      </div>`).join("") + statusHtml;
+
+    const newsHits = ((SNAPSHOT.broker_news || {}).hits) || [];
+    const newsEl = document.getElementById("broker-news");
+    newsEl.innerHTML = newsHits.length ? newsHits.map(n => {
+      const title = String(n.title || "");
+      const link = String(n.link || "#");
+      return `<div class="hit"><a href="${link.replace(/"/g, "")}" target="_blank" rel="noopener">${title.replace(/</g, "&lt;")}</a>
+        <div class="meta">${n.published || ""}</div></div>`;
+    }).join("") : `<div class="muted">No Robinhood / Schwab / Fidelity BTC-ETF restriction headlines in the last 7 days. Harder to track than the basket — this is a news watch, not a hard print.</div>`;
 
     const hits = EVAL.hits || [];
     document.getElementById("hits").innerHTML = hits.length ? hits.map(h => {
@@ -278,6 +313,10 @@
       ["P3", "BTC/gold > 30 oz", q.btc_gold_oz > 30],
       ["P1", "Exchange BTC +10k/day", (c.exchange_btc_chg || 0) >= 10000],
       ["P1", "IBIT daily outflow ≤ -$200m", q.ibit_flow_musd <= -200],
+      ["P2", "IBIT creation basket empty/suspended", q.ibit_creation_status === "empty" || q.ibit_creation_status === "suspended"],
+      ["P1", "IBIT premium vs NAV ≥ 20%", q.ibit_prem_pct >= 20],
+      ["P2", "IBIT premium vs NAV ≥ 30%", q.ibit_prem_pct >= 30],
+      ["P1", "Broker BTC-ETF restriction headlines", (q.broker_restriction_hits || 0) >= 1],
       ["P1", "MSTR mNAV < 1.0x", q.mstr_mnav > 0 && q.mstr_mnav < 1],
       ["P2", "Strategy net seller this quarter", (q.strategy_sold_qtd || 0) >= 500],
     ];
@@ -323,11 +362,11 @@
     const common = { responsive: true, maintainAspectRatio: true, plugins: { legend: { labels: { color: "#8b9aab" } } },
       scales: { x: { ticks: { color: "#8b9aab", maxTicksLimit: 8 }, grid: { color: "#243041" } },
                 y: { ticks: { color: "#8b9aab" }, grid: { color: "#243041" } } } };
-    function line(id, datasets, extraY) {
+    function line(id, datasets, extraY, emptyNote) {
       const canvas = document.getElementById(id);
       const has = datasets.some(ds => (ds.data || []).some(v => v !== null && v !== undefined && !Number.isNaN(v)));
       if (!has) {
-        canvas.parentElement.innerHTML = '<p class="muted">No series yet. IBIT daily needs SOSOVALUE_API_KEY or a Farside session that is not behind Cloudflare. mNAV/holdings fill in as history.csv grows.</p>';
+        canvas.parentElement.innerHTML = '<p class="muted">' + (emptyNote || "No series yet. Charts fill in as history.csv grows.") + "</p>";
         return;
       }
       const opts = JSON.parse(JSON.stringify(common));
@@ -354,7 +393,9 @@
       mk("BTC", "btc", "#e3b341", "y1"),
     ], { position: "right", ticks: { color: "#8b9aab" }, grid: { drawOnChartArea: false } });
     line("chart-exchange", [mk("Exchange BTC", "exchange_btc", "#5aa2ff")]);
-    line("chart-ibit", [mk("IBIT $m", "ibit_flow_musd", "#d4a017")]);
+    line("chart-ibit", [mk("IBIT $m", "ibit_flow_musd", "#d4a017")], null,
+      "No IBIT daily flow yet. Needs SOSOVALUE_API_KEY or a Farside session that is not behind Cloudflare.");
+    line("chart-ibit-prem", [mk("IBIT prem %", "ibit_prem_pct", "#e24a4a")]);
     line("chart-mnav", [mk("mNAV", "mstr_mnav", "#e24a4a")]);
     line("chart-strategy", [mk("Strategy BTC", "strategy_btc", "#e3b341")]);
   </script>

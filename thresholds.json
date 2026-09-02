@@ -51,6 +51,16 @@
     "watch_outflow": -200,
     "alert_outflow": -500
   },
+  "ibit_premium_pct": {
+    "watch": 20,
+    "alert": 30
+  },
+  "ibit_creation": {
+    "closed_is_alert": true
+  },
+  "broker_restrictions": {
+    "news_is_watch": true
+  },
   "mstr_mnav": {
     "discount": 1.0,
     "unwind": 0.85,

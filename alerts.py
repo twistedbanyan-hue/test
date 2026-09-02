@@ -287,6 +287,54 @@ def evaluate(snapshot: dict[str, Any], thresholds: dict[str, Any], history: list
         lambda: f"Strategy is a net SELLER this quarter: {sold_qtd:,.0f} BTC (QTD acquired {qtd_acq:+,.0f})",
         sold_qtd,
     )
+
+    prem_cfg = thresholds.get("ibit_premium_pct") or {}
+    creation_cfg = thresholds.get("ibit_creation") or {}
+    news_cfg = thresholds.get("broker_restrictions") or {}
+    ibit_prem = _f(q.get("ibit_prem_pct"))
+    basket_btc = _f(q.get("ibit_basket_btc"))
+    creation = str(q.get("ibit_creation_status") or "").lower()
+    news_hits = _f(q.get("broker_restriction_hits")) or 0
+    headlines = ((snapshot.get("broker_news") or {}).get("hits") or [])
+    first_headline = (headlines[0] or {}).get("title") if headlines else ""
+    gate_closed = creation in {"empty", "suspended"}
+    watch_prem = prem_cfg.get("watch", 20)
+    alert_prem = prem_cfg.get("alert", 30)
+    add(
+        gate_closed and creation_cfg.get("closed_is_alert", True),
+        3 if (ibit_prem is not None and ibit_prem >= watch_prem) else 2,
+        "ibit_creation_gate",
+        lambda: (
+            f"IBIT creation/redemption {creation}"
+            + (f" (basket {basket_btc} BTC/CU)" if basket_btc is not None else " (BlackRock daily basket empty or halted)")
+            + (
+                f" and live premium {ibit_prem:+.1f}% vs NAV — creation is choked"
+                if ibit_prem is not None and ibit_prem >= watch_prem
+                else " — that is the gate"
+            )
+        ),
+        creation,
+    )
+    add(
+        ibit_prem is not None and ibit_prem >= watch_prem,
+        2 if (ibit_prem or 0) >= alert_prem else 1,
+        "ibit_premium",
+        lambda: (
+            f"IBIT trading {ibit_prem:+.1f}% vs NAV "
+            f"(watch {watch_prem:.0f}% / alert {alert_prem:.0f}% — creation probably choked)"
+        ),
+        ibit_prem,
+    )
+    add(
+        news_hits >= 1 and news_cfg.get("news_is_watch", True),
+        1,
+        "broker_restriction_news",
+        lambda: (
+            f"BTC ETF brokerage-restriction headlines ({int(news_hits)})"
+            + (f": {first_headline}" if first_headline else " — Robinhood / Schwab / Fidelity")
+        ),
+        news_hits,
+    )
     phase = max((h["phase"] for h in hits), default=0)
     scenario = score_scenarios(snapshot, thresholds, hits)
     return {
@@ -359,6 +407,12 @@ def score_scenarios(snapshot: dict[str, Any], thresholds: dict[str, Any], hits: 
         scores["C"] += 1.5
     if ratio >= 40:
         scores["C"] += 1.0
+    if "ibit_creation_gate" in keys:
+        scores["C"] += 2.0
+    if "ibit_premium" in keys:
+        scores["C"] += 1.5
+    if "broker_restriction_news" in keys:
+        scores["A"] += 0.8
 
     # Muddle: nothing firing, gold/BTC sleepy
     if not hits:
@@ -523,6 +577,57 @@ def _self_test() -> int:
     sell["quotes"]["strategy_btc_qtd"] = -950
     r5 = evaluate(sell, thresholds, [])
     assert r5["phase"] == 2, r5
+
+    empty = json.loads(json.dumps(base))
+    empty["quotes"]["ibit_creation_status"] = "empty"
+    empty["quotes"]["ibit_basket_btc"] = 0
+    r6 = evaluate(empty, thresholds, [])
+    assert r6["phase"] == 2, r6
+    assert any(h["key"] == "ibit_creation_gate" for h in r6["hits"]), r6
+
+    prem = json.loads(json.dumps(base))
+    prem["quotes"]["ibit_prem_pct"] = 25
+    r7 = evaluate(prem, thresholds, [])
+    assert r7["phase"] == 1, r7
+    assert any(h["key"] == "ibit_premium" for h in r7["hits"]), r7
+
+    prem_alert = json.loads(json.dumps(base))
+    prem_alert["quotes"]["ibit_prem_pct"] = 31
+    r8 = evaluate(prem_alert, thresholds, [])
+    assert r8["phase"] == 2, r8
+
+    choked = json.loads(json.dumps(base))
+    choked["quotes"]["ibit_creation_status"] = "empty"
+    choked["quotes"]["ibit_prem_pct"] = 22
+    r9 = evaluate(choked, thresholds, [])
+    assert r9["phase"] == 3, r9
+
+    news = json.loads(json.dumps(base))
+    news["quotes"]["broker_restriction_hits"] = 2
+    news["broker_news"] = {
+        "hits": [{"title": "Schwab restricts bitcoin ETF purchases", "link": "", "published": ""}]
+    }
+    r10 = evaluate(news, thresholds, [])
+    assert r10["phase"] == 1, r10
+    assert any(h["key"] == "broker_restriction_news" for h in r10["hits"]), r10
+
+    from tracker import _creation_status, _ishares_field, _restriction_headline
+
+    sample = (
+        '"navAmount":{"formattedValue":"43.73","formattedAsOfDate":"Sep 01, 2026"},'
+        '"basketAmt":{"label":"Basket Bitcoin Amount","formattedValue":"22.65"},'
+        '"premiumDiscountClosingPriceNavPercent":{"formattedValue":"0.06"}'
+    )
+    assert _ishares_field(sample, "navAmount").get("formattedValue") == "43.73"
+    assert _ishares_field(sample, "basketAmt").get("formattedValue") == "22.65"
+    assert _creation_status("ok", 22.65, True) == "open"
+    assert _creation_status("ok", 0.0, True) == "empty"
+    assert _creation_status("ok", None, True) == "empty"
+    assert _creation_status("Creations and redemptions are suspended until further notice.", 22.65, True) == "suspended"
+    assert _restriction_headline("Schwab restricts bitcoin ETF purchases")
+    assert not _restriction_headline(
+        "Ark Invest buys Robinhood shares, offloads its own spot bitcoin ETF - The Block"
+    )
     print("self-test ok")
     return 0
 
