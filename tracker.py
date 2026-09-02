@@ -393,16 +393,36 @@ def fetch_auctions() -> dict[str, Any]:
 # Snapshot + history
 # ---------------------------------------------------------------------------
 
-def _pct(new: float | None, old: float | None) -> float | None:
-    if new is None or old in (None, 0):
+def _pct(new: Any, old: Any) -> float | None:
+    new_f, old_f = _f(new), _f(old)
+    if new_f is None or old_f in (None, 0):
         return None
-    return (new - old) / old * 100.0
+    return (new_f - old_f) / old_f * 100.0
 
 
-def _bps(new: float | None, old: float | None) -> float | None:
-    if new is None or old is None:
+def _bps(new: Any, old: Any) -> float | None:
+    new_f, old_f = _f(new), _f(old)
+    if new_f is None or old_f is None:
         return None
-    return (new - old) * 100.0
+    return (new_f - old_f) * 100.0
+
+
+def _prior_from_history(field: str, before_date: str | None) -> Any:
+    if not before_date:
+        return None
+    for row in reversed(read_history()):
+        if row.get("date") and row["date"] < before_date and row.get(field) not in ("", None):
+            return row.get(field)
+    return None
+
+
+def _prior_from_series(series: list[dict[str, Any]], field: str, before_date: str | None) -> Any:
+    if not before_date:
+        return None
+    for row in reversed(series):
+        if row.get("date") and row["date"] < before_date and row.get(field) not in ("", None):
+            return row.get(field)
+    return None
 
 
 def _history_map(series: list[dict[str, Any]], value_key: str) -> dict[str, float]:
@@ -449,17 +469,12 @@ def build_snapshot(backfill_days: int = 0) -> dict[str, Any]:
     ]
     as_of = max(c for c in as_of_candidates if c)
 
-    # Daily changes: prefer official previous close, then Yahoo prev, then history.csv.
-    prior_csv = _last_history_row()
     jgb_hist = jgb.get("history") or []
-    jgb_prev = jgb_hist[-2] if len(jgb_hist) >= 2 else {}
-    if jgb_prev.get("date") == jgb_latest.get("date") and len(jgb_hist) >= 3:
-        jgb_prev = jgb_hist[-3]
-    if not jgb_prev and prior_csv:
-        jgb_prev = prior_csv
-
     ust_hist = ust.get("history") or []
-    ust_prev = ust_hist[-2] if len(ust_hist) >= 2 else (prior_csv or {})
+    jgb_asof = jgb_latest.get("date")
+    ust_asof = ust_latest.get("date")
+    jgb_prev_40 = _prior_from_series(jgb_hist, "jgb_40y", jgb_asof) or _prior_from_history("jgb_40y", jgb_asof)
+    ust_prev_30 = _prior_from_series(ust_hist, "ust_30y", ust_asof) or _prior_from_history("ust_30y", ust_asof)
 
     quotes = {
         "jgb_10y": _round(jgb_latest.get("jgb_10y"), 3),
@@ -475,8 +490,8 @@ def build_snapshot(backfill_days: int = 0) -> dict[str, Any]:
         "btc_volume": _round(btc.get("volume"), 0),
     }
     changes = {
-        "jgb_40y_bps": _round(_bps(jgb_latest.get("jgb_40y"), jgb_prev.get("jgb_40y")), 2),
-        "ust_30y_bps": _round(_bps(ust_latest.get("ust_30y"), ust_prev.get("ust_30y")), 2),
+        "jgb_40y_bps": _round(_bps(jgb_latest.get("jgb_40y"), jgb_prev_40), 2),
+        "ust_30y_bps": _round(_bps(ust_latest.get("ust_30y"), ust_prev_30), 2),
         "gold_pct": _round(gold.get("pct") if gold.get("pct") is not None else _pct(gold_px, gold.get("prev")), 3),
         "btc_pct": _round(btc.get("pct"), 3),
         "dxy_pct": _round(dxy.get("pct"), 3),
@@ -501,11 +516,6 @@ def build_snapshot(backfill_days: int = 0) -> dict[str, Any]:
         },
     }
     return snapshot
-
-
-def _last_history_row() -> dict[str, Any] | None:
-    rows = read_history()
-    return rows[-1] if rows else None
 
 
 def read_history() -> list[dict[str, Any]]:
