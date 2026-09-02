@@ -1,0 +1,46 @@
+{
+  "jgb_40y": {
+    "watch": 4.5,
+    "level": 5.0,
+    "daily_move_bps": 20
+  },
+  "ust_30y": {
+    "watch": 5.0,
+    "level": 5.5,
+    "daily_move_bps": 15
+  },
+  "usd_jpy": {
+    "watch_high": 170,
+    "watch_low": 145,
+    "spike_high": 180,
+    "collapse_low": 140
+  },
+  "dxy": {
+    "breakdown": 95,
+    "crash": 90
+  },
+  "btc_gold_ratio": {
+    "ath_distance_pct": 60,
+    "trough": 13.4,
+    "action_break": 30
+  },
+  "treasury_bid_to_cover": {
+    "watch_trend": 2.3,
+    "soft": 2.2,
+    "danger": 2.0,
+    "fail": 1.8
+  },
+  "treasury_tail_bps": {
+    "action": 5,
+    "lookback_days": 14
+  },
+  "gold_btc_gap": {
+    "widen_pct": 50
+  },
+  "gold_gap_pct": {
+    "action": 3.0
+  },
+  "btc_volume_usd": {
+    "with_volume": 25000000000
+  }
+}

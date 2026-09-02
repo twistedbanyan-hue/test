@@ -1,0 +1,46 @@
+{
+  "A": {
+    "name": "The Slow Bleed",
+    "probability": 0.40,
+    "window": "2026–2032",
+    "btc_multiple": "4–5x",
+    "btc_target": "$250K–$350K",
+    "gold_target": "$6,500–$8,000",
+    "ratio_peak": "40–50 oz",
+    "summary": "Bessent caps the long end. Japan leaks capital home without a full crack. Auctions soften but never fail. Dollar drifts down 3–5%/year. Gold compounds 12–15%. BTC grinds, no explosion.",
+    "outcome": "65+ plan gets funded but not extravagantly."
+  },
+  "B": {
+    "name": "The Japan Shock",
+    "probability": 0.35,
+    "window": "2026–2028",
+    "btc_multiple": "6–8x",
+    "btc_target": "$400K–$600K",
+    "gold_target": "$8,000–$10,000",
+    "ratio_peak": "60–75 oz",
+    "summary": "A Japanese institution reallocates out of USTs as 40Y JGB hits 5%+. Yen carry unwinds (USD/JPY 180 then 140). UST 30Y gaps to 6%+. Ugly 1.8x auction. Gold/BTC gap.",
+    "outcome": "Base-case bull. 65+ plan overfunded. Optionality for Lisbon/Medellín while keeping the Katy house."
+  },
+  "C": {
+    "name": "The Treasury Seizure",
+    "probability": 0.15,
+    "window": "2027–2029",
+    "btc_multiple": "10–15x",
+    "btc_target": "$800K–$1.2M",
+    "gold_target": "$12,000+",
+    "ratio_peak": ">100 oz",
+    "summary": "An auction fails. 10Y spikes 150bps in a month. DXY through 90. EM dollar-debt cascade. Gold limit-up. BTC mania then 40% retrace as regulation slams down.",
+    "outcome": "The 10x. Real gains, messy exit (tax, reporting, withdrawal limits)."
+  },
+  "D": {
+    "name": "The Muddle Through",
+    "probability": 0.10,
+    "window": "2026–2036",
+    "btc_multiple": "1–2x",
+    "btc_target": "stagnant",
+    "gold_target": "$3,000–$4,500",
+    "ratio_peak": "range-bound",
+    "summary": "AI productivity, spending cuts, or a growth surprise let the US grow out of debt-to-GDP. Gold range-bound. BTC trades like a tech stock. Optionality thesis fails.",
+    "outcome": "Not catastrophic. The hedge did not pay."
+  }
+}

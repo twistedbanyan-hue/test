@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Debt Tracker — JGB / UST / Gold / BTC</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg: #0b0e11;
+      --bg-2: #12171d;
+      --card: #161c24;
+      --line: #243041;
+      --text: #e8eef6;
+      --muted: #8b9aab;
+      --gold: #d4a017;
+      --green: #3ecf8e;
+      --red: #e24a4a;
+      --amber: #e3b341;
+      --blue: #5aa2ff;
+      --phase0: #3ecf8e;
+      --phase1: #e3b341;
+      --phase2: #e07a3d;
+      --phase3: #e24a4a;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); }
+    body {
+      font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+      font-size: 14px;
+      line-height: 1.45;
+    }
+    header {
+      display: flex; justify-content: space-between; align-items: flex-end;
+      padding: 22px 28px 16px; border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, #141a22, var(--bg));
+      gap: 16px; flex-wrap: wrap;
+    }
+    header h1 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: 0.04em; }
+    header h1 span { color: var(--gold); }
+    .meta { color: var(--muted); font-size: 12px; }
+    .phase-badge {
+      padding: 8px 14px; border-radius: 999px; font-weight: 600;
+      letter-spacing: 0.03em; font-size: 13px; border: 1px solid transparent;
+    }
+    .p0 { background: #143326; color: var(--phase0); border-color: #1f5c40; }
+    .p1 { background: #3a2f12; color: var(--phase1); border-color: #6a5420; }
+    .p2 { background: #3a2414; color: var(--phase2); border-color: #7a3f18; }
+    .p3 { background: #3a1418; color: var(--phase3); border-color: #7a242c; animation: pulse 1.6s infinite; }
+    @keyframes pulse { 50% { box-shadow: 0 0 0 6px rgba(226,74,74,0.12); } }
+    main { padding: 20px 28px 48px; max-width: 1400px; margin: 0 auto; }
+    h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted); margin: 28px 0 12px; }
+    .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+    .kpi {
+      background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px;
+    }
+    .kpi .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; }
+    .kpi .val { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 22px; margin-top: 4px; }
+    .kpi .chg { font-size: 12px; margin-top: 2px; }
+    .up { color: var(--red); }   /* yields up = stress */
+    .dn { color: var(--green); }
+    .up.asset { color: var(--green); }
+    .dn.asset { color: var(--red); }
+    .grid-2 { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 16px; }
+    .grid-2-eq { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    @media (max-width: 900px) { .grid-2, .grid-2-eq { grid-template-columns: 1fr; } }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+    .hit { padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+    .hit:last-child { border-bottom: 0; }
+    .tag { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; margin-right: 8px; }
+    .tag.a { color: var(--phase3); }
+    .tag.l { color: var(--phase2); }
+    .tag.w { color: var(--phase1); }
+    canvas { max-height: 280px; }
+    table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+    th { text-align: left; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; padding: 6px 8px; }
+    td { padding: 7px 8px; border-top: 1px solid var(--line); font-family: ui-monospace, monospace; font-size: 12px; }
+    .scenarios { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+    @media (max-width: 1100px) { .scenarios { grid-template-columns: 1fr 1fr; } }
+    @media (max-width: 640px) { .scenarios { grid-template-columns: 1fr; } }
+    .sc { border: 1px solid var(--line); border-radius: 12px; padding: 14px; background: var(--bg-2); }
+    .sc.lead { border-color: var(--gold); box-shadow: inset 0 0 0 1px rgba(212,160,23,0.25); }
+    .sc h3 { margin: 0 0 6px; font-size: 14px; }
+    .prob { color: var(--gold); font-family: ui-monospace, monospace; font-size: 12px; }
+    .sc p { color: var(--muted); font-size: 12px; margin: 8px 0 0; }
+    .checks a { color: var(--blue); text-decoration: none; }
+    .checks a:hover { text-decoration: underline; }
+    .checks li { margin: 6px 0; }
+    .muted { color: var(--muted); }
+    footer { color: var(--muted); font-size: 11px; margin-top: 28px; }
+    .cond { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-bottom: 1px dashed var(--line); font-size: 12px; }
+    .ok { color: var(--green); } .no { color: var(--muted); } .bad { color: var(--red); }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>DEBT <span>TRACKER</span></h1>
+      <div class="meta">JGB · UST · DXY · USD/JPY · Gold · BTC · Auction cover — generated __GENERATED__</div>
+    </div>
+    <div id="phase-badge" class="phase-badge p0">—</div>
+  </header>
+  <main>
+    <div class="kpis" id="kpis"></div>
+
+    <div class="grid-2" style="margin-top:18px">
+      <div class="card">
+        <h2 style="margin-top:0">Live hits</h2>
+        <div id="hits">No thresholds breached.</div>
+        <div class="meta" id="lean" style="margin-top:12px"></div>
+      </div>
+      <div class="card">
+        <h2 style="margin-top:0">Phase checklist</h2>
+        <div id="checklist"></div>
+      </div>
+    </div>
+
+    <h2>Scenarios (priors 40 / 35 / 15 / 10)</h2>
+    <div class="scenarios" id="scenarios"></div>
+
+    <h2>Yields</h2>
+    <div class="card"><canvas id="chart-yields"></canvas></div>
+
+    <div class="grid-2-eq">
+      <div>
+        <h2>Dollar & yen</h2>
+        <div class="card"><canvas id="chart-fx"></canvas></div>
+      </div>
+      <div>
+        <h2>BTC / gold (oz)</h2>
+        <div class="card"><canvas id="chart-ratio"></canvas></div>
+      </div>
+    </div>
+
+    <h2>Gold & bitcoin</h2>
+    <div class="card"><canvas id="chart-assets"></canvas></div>
+
+    <div class="grid-2">
+      <div class="card">
+        <h2 style="margin-top:0">Long-end auctions (TIPS stripped)</h2>
+        <div style="overflow-x:auto"><table id="auctions"></table></div>
+      </div>
+      <div class="card">
+        <h2 style="margin-top:0">Upcoming Treasury auctions</h2>
+        <div style="overflow-x:auto"><table id="upcoming"></table></div>
+      </div>
+    </div>
+
+    <h2>Weekly human check</h2>
+    <div class="card checks">
+      <ol>
+        <li><a href="https://www.piie.com/experts/robin-brooks" target="_blank" rel="noopener">PIIE / Robin Brooks</a> and
+            <a href="https://www.cfr.org/expert/brad-w-setser" target="_blank" rel="noopener">Brad Setser (CFR)</a> — Japan official-sector flows into USTs.</li>
+        <li><a href="https://home.treasury.gov/policy-issues/financing-the-government/quarterly-refunding" target="_blank" rel="noopener">Treasury quarterly refunding / buybacks</a> — frequency and size going up?</li>
+        <li><a href="https://www.boj.or.jp/en/mopo/mpmsche_minu/index.htm" target="_blank" rel="noopener">BOJ policy board minutes</a> — any mention of “financial stability”.</li>
+        <li><a href="https://www.cftc.gov/MarketReports/CommitmentsofTraders/index.htm" target="_blank" rel="noopener">CFTC COT</a> — speculator positioning in gold and Treasury futures.</li>
+        <li><a href="https://www.treasurydirect.gov/auctions/upcoming/" target="_blank" rel="noopener">TreasuryDirect auction calendar</a> —
+            <a href="https://www.mof.go.jp/english/policy/jgbs/reference/interest_rate/index.htm" target="_blank" rel="noopener">MOF JGB yields</a>.</li>
+      </ol>
+      <p class="muted">The script is the edge on hours. The weekly read is the edge on regime. Do both.</p>
+    </div>
+    <footer>
+      Local file generated by <code>tracker.py</code>. Not investment advice. Numbers are official prints plus Yahoo/CoinGecko last.
+    </footer>
+  </main>
+  <script>
+    const SNAPSHOT = __SNAPSHOT__;
+    const EVAL = __EVAL__;
+    const HISTORY = __HISTORY__;
+    const SCENARIOS = __SCENARIOS__;
+
+    const q = SNAPSHOT.quotes || {};
+    const c = SNAPSHOT.changes || {};
+    const phase = EVAL.phase || 0;
+    const badge = document.getElementById("phase-badge");
+    badge.textContent = EVAL.phase_name || "All Clear";
+    badge.className = "phase-badge p" + phase;
+
+    function fmt(v, d=2, suffix="") {
+      if (v === null || v === undefined || v === "") return "—";
+      const n = Number(v);
+      if (Number.isNaN(n)) return v;
+      return n.toLocaleString(undefined, { maximumFractionDigits: d, minimumFractionDigits: 0 }) + suffix;
+    }
+    function chg(v, suffix, invert=false) {
+      if (v === null || v === undefined || v === "") return "";
+      const n = Number(v);
+      const sign = n > 0 ? "+" : "";
+      const cls = (n > 0 ? "up" : "dn") + (invert ? " asset" : "");
+      return `<div class="chg ${cls}">${sign}${n.toFixed(2)}${suffix}</div>`;
+    }
+    const tiles = [
+      ["JGB 10Y", q.jgb_10y, 3, "%", null, false],
+      ["JGB 30Y", q.jgb_30y, 3, "%", null, false],
+      ["JGB 40Y", q.jgb_40y, 3, "%", c.jgb_40y_bps, false, " bps"],
+      ["UST 10Y", q.ust_10y, 3, "%", null, false],
+      ["UST 30Y", q.ust_30y, 3, "%", c.ust_30y_bps, false, " bps"],
+      ["USD/JPY", q.usd_jpy, 2, "", c.usd_jpy_pct, false, "%"],
+      ["DXY", q.dxy, 2, "", c.dxy_pct, true, "%"],
+      ["Gold", q.gold, 1, "", c.gold_pct, true, "%"],
+      ["BTC", q.btc, 0, "", c.btc_pct, true, "%"],
+      ["BTC/gold", q.btc_gold_oz, 1, " oz", null, false],
+    ];
+    document.getElementById("kpis").innerHTML = tiles.map(t => `
+      <div class="kpi">
+        <div class="label">${t[0]}</div>
+        <div class="val">${fmt(t[1], t[2], t[3])}</div>
+        ${t[4] !== null && t[4] !== undefined ? chg(t[4], t[6] || "", t[5]) : ""}
+      </div>`).join("");
+
+    const hits = EVAL.hits || [];
+    document.getElementById("hits").innerHTML = hits.length ? hits.map(h => {
+      const tag = h.phase === 3 ? "ACTION" : h.phase === 2 ? "ALERT" : "WATCH";
+      const cls = h.phase === 3 ? "a" : h.phase === 2 ? "l" : "w";
+      return `<div class="hit"><span class="tag ${cls}">${tag}</span>${h.message}</div>`;
+    }).join("") : `<div class="muted">No thresholds breached. Stay in weekly human-check mode.</div>`;
+    const sc = EVAL.scenario || {};
+    document.getElementById("lean").textContent =
+      "Tape lean: Scenario " + (sc.leader || "?") + "  ·  scores " + JSON.stringify(sc.scores || {});
+
+    const auct = SNAPSHOT.auctions || {};
+    const avg = auct.avg_btc_3;
+    const checklist = [
+      ["P1", "JGB 40Y > 4.5% and climbing", q.jgb_40y > 4.5 && (c.jgb_40y_bps || 0) > 0],
+      ["P1", "UST 30Y > 5.0%", q.ust_30y > 5.0],
+      ["P1", "USD/JPY > 170 or < 145", q.usd_jpy > 170 || q.usd_jpy < 145],
+      ["P1", "3-auction bid-to-cover < 2.3x", avg !== null && avg < 2.3],
+      ["P2", "JGB 40Y > 5.0% + 20bps day", q.jgb_40y > 5.0 && (c.jgb_40y_bps || 0) >= 20],
+      ["P2", "UST 30Y > 5.5% + 15bps day", q.ust_30y > 5.5 && (c.ust_30y_bps || 0) >= 15],
+      ["P2", "Any coupon auction BTC < 2.0x", (auct.recent || []).some(r => r.bid_to_cover && r.bid_to_cover < 2.0)],
+      ["P2", "DXY < 95", q.dxy < 95],
+      ["P2", "Gold & BTC up, DXY down", c.gold_pct > 0 && c.btc_pct > 0 && c.dxy_pct < 0],
+      ["P3", "DXY < 90", q.dxy < 90],
+      ["P3", "Gold gap > 3%", c.gold_pct >= 3],
+      ["P3", "BTC/gold > 30 oz", q.btc_gold_oz > 30],
+    ];
+    document.getElementById("checklist").innerHTML = checklist.map(([p, label, on]) =>
+      `<div class="cond"><span>${p} · ${label}</span><span class="${on ? "bad" : "no"}">${on ? "HIT" : "quiet"}</span></div>`
+    ).join("");
+
+    document.getElementById("scenarios").innerHTML = ["A","B","C","D"].map(k => {
+      const s = SCENARIOS[k];
+      const lead = sc.leader === k ? " lead" : "";
+      return `<div class="sc${lead}">
+        <div class="prob">Scenario ${k} · ${(s.probability*100).toFixed(0)}% prior</div>
+        <h3>${s.name}</h3>
+        <div class="meta">${s.window} · BTC ${s.btc_multiple} → ${s.btc_target}</div>
+        <p>${s.summary}</p>
+        <p>${s.outcome}</p>
+      </div>`;
+    }).join("");
+
+    function table(id, rows, cols) {
+      const el = document.getElementById(id);
+      if (!rows || !rows.length) { el.innerHTML = "<tr><td class='muted'>None</td></tr>"; return; }
+      el.innerHTML = "<tr>" + cols.map(c => `<th>${c[0]}</th>`).join("") + "</tr>" +
+        rows.map(r => "<tr>" + cols.map(c => {
+          let v = r[c[1]];
+          if (c[2] === "bn" && v) v = "$" + (Number(v)/1e9).toFixed(1) + "B";
+          else if (c[2] === "x" && v) v = Number(v).toFixed(2) + "x";
+          else if (c[2] === "bps" && v !== null && v !== undefined) v = v + " bps";
+          else if (v === null || v === undefined) v = "—";
+          return `<td>${v}</td>`;
+        }).join("") + "</tr>").join("");
+    }
+    table("auctions", auct.recent || [], [
+      ["Date", "auction_date"], ["Term", "security_term"], ["Cover", "bid_to_cover", "x"],
+      ["High yld", "high_yield"], ["Tail", "tail_bps", "bps"], ["Size", "offering_amt", "bn"],
+    ]);
+    table("upcoming", auct.upcoming || [], [
+      ["Date", "auction_date"], ["Type", "security_type"], ["Term", "security_term"], ["Size", "offering_amt", "bn"],
+    ]);
+
+    const labels = HISTORY.map(r => r.date);
+    const num = (key) => HISTORY.map(r => (r[key] === "" || r[key] == null) ? null : Number(r[key]));
+    const common = { responsive: true, maintainAspectRatio: true, plugins: { legend: { labels: { color: "#8b9aab" } } },
+      scales: { x: { ticks: { color: "#8b9aab", maxTicksLimit: 8 }, grid: { color: "#243041" } },
+                y: { ticks: { color: "#8b9aab" }, grid: { color: "#243041" } } } };
+    function line(id, datasets, extraY) {
+      const opts = JSON.parse(JSON.stringify(common));
+      if (extraY) opts.scales.y1 = extraY;
+      new Chart(document.getElementById(id), { type: "line", data: { labels, datasets }, options: opts });
+    }
+    const mk = (label, key, color, yAxisID) => ({
+      label, data: num(key), borderColor: color, backgroundColor: "transparent",
+      tension: 0.15, pointRadius: 0, borderWidth: 1.6, spanGaps: true, yAxisID,
+    });
+    line("chart-yields", [
+      mk("JGB 10Y", "jgb_10y", "#5aa2ff"),
+      mk("JGB 40Y", "jgb_40y", "#d4a017"),
+      mk("UST 10Y", "ust_10y", "#8b9aab"),
+      mk("UST 30Y", "ust_30y", "#e24a4a"),
+    ]);
+    line("chart-fx", [
+      mk("DXY", "dxy", "#5aa2ff", "y"),
+      mk("USD/JPY", "usd_jpy", "#d4a017", "y1"),
+    ], { position: "right", ticks: { color: "#8b9aab" }, grid: { drawOnChartArea: false } });
+    line("chart-ratio", [mk("BTC/gold oz", "btc_gold_oz", "#d4a017")]);
+    line("chart-assets", [
+      mk("Gold", "gold", "#d4a017", "y"),
+      mk("BTC", "btc", "#e3b341", "y1"),
+    ], { position: "right", ticks: { color: "#8b9aab" }, grid: { drawOnChartArea: false } });
+  </script>
+</body>
+</html>
