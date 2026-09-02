@@ -49,6 +49,9 @@ Exit codes for wrapping: `0` all-clear or watch, `1` Phase 2, `2` Phase 3.
 | DXY, USD/JPY, gold futures fallback | Yahoo Finance chart API |
 | Gold spot | gold-api.com |
 | BTC + 24h volume | CoinGecko |
+| Exchange BTC reserves | CoinMetrics `SplyExNtv` (Glassnode/CryptoQuant class). Optional `GLASSNODE_API_KEY` / `CRYPTOQUANT_API_KEY` |
+| IBIT daily flows | Farside scrape + optional `SOSOVALUE_API_KEY`. Strategy 7d US-ETF print as backup |
+| MSTR mNAV, Strategy BTC, QTD sales | [Strategy treasury API](https://api.strategy.com/btc/bitcoinKpis) |
 | 10Y / 30Y bid-to-cover, tail | [Treasury Fiscal Data auctions](https://fiscaldata.treasury.gov/datasets/treasury-securities-auctions-data/treasury-securities-auctions-data) (TIPS/FRNs stripped) |
 
 Tail = high yield − median yield, in basis points. A failed auction is bid-to-cover below the fail line **or** tendered amount below the offering.
@@ -112,4 +115,12 @@ python3 alerts.py                  # re-evaluate last snapshot
 python3 alerts.py --self-test      # phase-logic unit check (no network)
 ```
 
-This is a research dashboard, not investment advice.
+Optional keys (used when set; otherwise the free fallbacks above):
+
+```bash
+export SOSOVALUE_API_KEY=...     # IBIT/US BTC ETF from SoSoValue
+export GLASSNODE_API_KEY=...     # exchange.balance
+export CRYPTOQUANT_API_KEY=...   # exchange-flows/reserve
+```
+
+Farside is scraped with no key. Datacenter IPs often get Cloudflare; a home Mac Mini usually does not.

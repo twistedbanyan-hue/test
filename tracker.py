@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 """Daily market pull for the debt / Japan / Treasury tracker.
 
-Free sources, no API keys:
+Free sources, no API keys required:
   JGB 10Y/30Y/40Y  — Japan Ministry of Finance constant-maturity CSV
   UST 10Y/30Y      — Treasury.gov yield-curve XML, Yahoo ^TNX/^TYX fallback
   DXY, USD/JPY     — Yahoo Finance
   Gold             — gold-api.com spot, Yahoo GC=F fallback
   BTC              — CoinGecko, Yahoo BTC-USD fallback
   Auction results  — Treasury Fiscal Data (bid-to-cover, tail)
+  Exchange reserves — CoinMetrics SplyExNtv (Glassnode/CryptoQuant class);
+                      optional GLASSNODE_API_KEY / CRYPTOQUANT_API_KEY
+  IBIT daily flows — Farside scrape, optional SOSOVALUE_API_KEY, Strategy 7d ETF print
+  MSTR mNAV / sales — Strategy treasury API (api.strategy.com/btc/bitcoinKpis)
 """
 
 from __future__ import annotations
@@ -16,6 +20,8 @@ import argparse
 import csv
 import json
 import math
+import os
+import re
 import sys
 import time
 import xml.etree.ElementTree as ET
@@ -57,6 +63,15 @@ HISTORY_FIELDS = [
     "auction_tail_bps",
     "auction_date",
     "avg_btc_3",
+    "exchange_btc",
+    "exchange_btc_chg",
+    "ibit_flow_musd",
+    "etf_flow_7d_musd",
+    "mstr_mnav",
+    "mstr_prem_pct",
+    "strategy_btc",
+    "strategy_btc_qtd",
+    "strategy_sold_qtd",
     "phase",
 ]
 
@@ -84,11 +99,14 @@ def _round(value: float | None, digits: int = 4) -> float | None:
     return round(value, digits)
 
 
-def get_json(url: str, params: dict | None = None, timeout: int = 25) -> Any:
+def get_json(url: str, params: dict | None = None, timeout: int = 25, extra_headers: dict | None = None) -> Any:
     last_err: Exception | None = None
+    headers = dict(SESSION.headers)
+    if extra_headers:
+        headers.update(extra_headers)
     for attempt in range(3):
         try:
-            resp = SESSION.get(url, params=params, timeout=timeout)
+            resp = SESSION.get(url, params=params, timeout=timeout, headers=headers)
             if resp.status_code == 429:
                 time.sleep(2 ** attempt)
                 continue
@@ -389,6 +407,206 @@ def fetch_auctions() -> dict[str, Any]:
     }
 
 
+def _comma_num(value: Any) -> float | None:
+    if value is None:
+        return None
+    return _f(str(value).replace(",", "").replace("$", "").replace("m", "").replace("M", ""))
+
+
+def fetch_strategy_kpis() -> dict[str, Any]:
+    """Official Strategy treasury dashboard (the Saylor KPI page)."""
+    payload = get_json("https://api.strategy.com/btc/bitcoinKpis")
+    r = payload.get("results") or {}
+    mnav = _f(r.get("mNav"))
+    qtd = _comma_num(r.get("btcAcquiredQtd"))
+    sold_qtd = max(0.0, -(qtd or 0.0)) if qtd is not None else None
+    return {
+        "holdings": _comma_num(r.get("btcHoldings")),
+        "qtd_acquired": qtd,
+        "ytd_acquired": _comma_num(r.get("btcAcquiredYtd")),
+        "sold_qtd": sold_qtd,
+        "mnav": mnav,
+        "prem_pct": None if mnav is None else round((mnav - 1.0) * 100.0, 2),
+        "mnav_chg_pct": _comma_num(r.get("mNavVarPerc")),
+        "exchange_supply": _comma_num(r.get("exchangeSupply")),
+        "etf_flow_7d_musd": _comma_num(r.get("etfNetFlows7d")),
+        "etf_flow_14d_musd": _comma_num(r.get("etfNetFlows14d")),
+        "etf_flow_30d_musd": _comma_num(r.get("etfNetFlows30d")),
+        "etf_btc_held": _comma_num(r.get("etfBtcHeld")),
+        "timestamp": payload.get("timestamp"),
+        "source": "strategy.bitcoinKpis",
+        "ledger_url": "https://www.strategy.com/ledger",
+    }
+
+
+def fetch_exchange_reserves(days: int = 90) -> dict[str, Any]:
+    """Exchange BTC supply. Prefers Glassnode/CryptoQuant keys; CoinMetrics is the free equivalent."""
+    gn_key = os.environ.get("GLASSNODE_API_KEY", "").strip()
+    cq_key = os.environ.get("CRYPTOQUANT_API_KEY", "").strip()
+    history: list[dict[str, Any]] = []
+    source = "coinmetrics.SplyExNtv"
+
+    if gn_key:
+        try:
+            rows = get_json(
+                "https://api.glassnode.com/v1/metrics/distribution/balance_exchanges",
+                params={"a": "BTC", "i": "24h", "f": "json"},
+                extra_headers={"X-Api-Key": gn_key},
+            )
+            for pt in rows[-days:]:
+                ts = pt.get("t")
+                day = datetime.fromtimestamp(int(ts), tz=timezone.utc).date().isoformat() if ts else None
+                if day:
+                    history.append({"date": day, "exchange_btc": _f(pt.get("v"))})
+            source = "glassnode.balance_exchanges"
+        except Exception:
+            history = []
+
+    if not history and cq_key:
+        try:
+            payload = get_json(
+                "https://api.cryptoquant.com/v1/btc/exchange-flows/reserve",
+                params={"exchange": "all_exchange", "window": "day", "limit": days},
+                extra_headers={"Authorization": f"Bearer {cq_key}"},
+            )
+            for pt in (payload.get("result") or payload.get("data") or []):
+                day = parse_date(str(pt.get("date") or pt.get("datetime") or ""))
+                val = _f(pt.get("reserve") or pt.get("value") or pt.get("exchange_reserve"))
+                if day and val is not None:
+                    history.append({"date": day, "exchange_btc": val})
+            source = "cryptoquant.exchange-reserve"
+        except Exception:
+            history = []
+
+    if not history:
+        payload = get_json(
+            "https://community-api.coinmetrics.io/v4/timeseries/asset-metrics",
+            params={
+                "assets": "btc",
+                "metrics": "SplyExNtv,FlowInExNtv,FlowOutExNtv",
+                "frequency": "1d",
+                "page_size": max(days, 5),
+                "paging_from": "end",
+            },
+        )
+        for row in payload.get("data") or []:
+            day = (row.get("time") or "")[:10]
+            if not day:
+                continue
+            history.append(
+                {
+                    "date": day,
+                    "exchange_btc": _f(row.get("SplyExNtv")),
+                    "flow_in": _f(row.get("FlowInExNtv")),
+                    "flow_out": _f(row.get("FlowOutExNtv")),
+                }
+            )
+        source = "coinmetrics.SplyExNtv"
+
+    history.sort(key=lambda r: r["date"])
+    latest = history[-1] if history else {}
+    prev = history[-2] if len(history) >= 2 else {}
+    chg = None
+    if latest.get("exchange_btc") is not None and prev.get("exchange_btc") is not None:
+        chg = round(latest["exchange_btc"] - prev["exchange_btc"], 1)
+    net_flow = None
+    if latest.get("flow_in") is not None and latest.get("flow_out") is not None:
+        net_flow = round(latest["flow_in"] - latest["flow_out"], 1)
+    return {
+        "latest": latest,
+        "daily_chg": chg,
+        "net_flow": net_flow,
+        "history": history,
+        "source": source,
+    }
+
+
+def _farside_cell(text: str) -> float | None:
+    raw = re.sub(r"<[^>]+>", "", text).strip().replace(",", "").replace("–", "-")
+    if raw in {"", "-", "—"}:
+        return None
+    if raw.startswith("(") and raw.endswith(")"):
+        return -(_f(raw[1:-1]) or 0.0)
+    return _f(raw)
+
+
+def fetch_farside_ibit() -> dict[str, Any]:
+    html = get_text("https://farside.co.uk/bitcoin-etf-flow-all-data/", timeout=20)
+    low = html.lower()
+    if "just a moment" in low or "cf-challenge" in low or "checking your browser" in low:
+        raise RuntimeError("farside.co.uk served a Cloudflare challenge (try from the Mac Mini)")
+    rows = re.findall(r"<tr[^>]*>(.*?)</tr>", html, flags=re.I | re.S)
+    if not rows:
+        raise RuntimeError("farside: no table rows")
+    header_cells = re.findall(r"<t[hd][^>]*>(.*?)</t[hd]>", rows[0], flags=re.I | re.S)
+    header = [re.sub(r"<[^>]+>", "", c).strip().upper() for c in header_cells]
+    try:
+        date_i = next(i for i, h in enumerate(header) if "DATE" in h)
+        ibit_i = next(i for i, h in enumerate(header) if h == "IBIT")
+    except StopIteration as exc:
+        raise RuntimeError(f"farside: missing Date/IBIT columns {header[:12]}") from exc
+    series: list[dict[str, Any]] = []
+    for row in rows[1:]:
+        cells = re.findall(r"<t[hd][^>]*>(.*?)</t[hd]>", row, flags=re.I | re.S)
+        if len(cells) <= max(date_i, ibit_i):
+            continue
+        day = parse_date(re.sub(r"<[^>]+>", "", cells[date_i]).strip())
+        flow = _farside_cell(cells[ibit_i])
+        if day and flow is not None:
+            series.append({"date": day, "ibit_flow_musd": flow})
+    if not series:
+        raise RuntimeError("farside: parsed zero IBIT prints")
+    series.sort(key=lambda r: r["date"])
+    return {"latest": series[-1], "history": series[-90:], "source": "farside.co.uk"}
+
+
+def fetch_sosovalue_ibit() -> dict[str, Any]:
+    key = os.environ.get("SOSOVALUE_API_KEY", "").strip()
+    if not key:
+        raise RuntimeError("SOSOVALUE_API_KEY not set")
+    payload = get_json(
+        "https://openapi.sosovalue.com/openapi/v1/etf/historicalInflowChart",
+        params={"type": "us-btc-spot"},
+        extra_headers={"x-soso-api-key": key},
+    )
+    data = payload.get("data") or payload.get("list") or payload
+    if isinstance(data, dict):
+        data = data.get("list") or data.get("items") or []
+    series: list[dict[str, Any]] = []
+    for row in data:
+        if not isinstance(row, dict):
+            continue
+        ticker = str(row.get("ticker") or row.get("etf") or row.get("name") or "").upper()
+        day = parse_date(str(row.get("date") or row.get("time") or ""))
+        flow = _f(row.get("netInflow") or row.get("totalNetInflow") or row.get("inflow"))
+        # Some payloads are already daily totals; prefer IBIT when tagged.
+        if ticker and ticker not in {"IBIT", "US-BTC-SPOT", ""}:
+            continue
+        if day and flow is not None:
+            # SoSoValue is USD; store millions.
+            series.append({"date": day, "ibit_flow_musd": round(flow / 1e6, 2) if abs(flow) > 10_000 else flow})
+    if not series:
+        raise RuntimeError("sosovalue: no IBIT/us-btc-spot points")
+    series.sort(key=lambda r: r["date"])
+    source = "sosovalue.us-btc-spot"
+    return {"latest": series[-1], "history": series[-90:], "source": source}
+
+
+def fetch_ibit_flows() -> dict[str, Any]:
+    errors: list[str] = []
+    if os.environ.get("SOSOVALUE_API_KEY", "").strip():
+        try:
+            return fetch_sosovalue_ibit()
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"sosovalue: {exc}")
+    try:
+        return fetch_farside_ibit()
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"farside: {exc}")
+    note = "IBIT daily unavailable (" + "; ".join(errors) + "). Using Strategy 7d US-ETF print until SoSoValue key or a non-Cloudflare Farside session."
+    return {"latest": {}, "history": [], "source": None, "errors": [note]}
+
+
 # ---------------------------------------------------------------------------
 # Snapshot + history
 # ---------------------------------------------------------------------------
@@ -455,6 +673,9 @@ def build_snapshot(backfill_days: int = 0) -> dict[str, Any]:
     gold = grab("gold", fetch_gold)
     btc = grab("btc", fetch_btc)
     auctions = grab("auctions", fetch_auctions)
+    strategy = grab("strategy", fetch_strategy_kpis)
+    reserves = grab("exchange_reserves", fetch_exchange_reserves, 90)
+    ibit = grab("ibit_flows", fetch_ibit_flows)
 
     jgb_latest = jgb.get("latest") or {}
     ust_latest = ust.get("latest") or {}
@@ -488,7 +709,19 @@ def build_snapshot(backfill_days: int = 0) -> dict[str, Any]:
         "btc": _round(btc_px, 2),
         "btc_gold_oz": _round(ratio, 2),
         "btc_volume": _round(btc.get("volume"), 0),
+        "exchange_btc": _round((reserves.get("latest") or {}).get("exchange_btc"), 1),
+        "ibit_flow_musd": _round((ibit.get("latest") or {}).get("ibit_flow_musd"), 2),
+        "etf_flow_7d_musd": _round(strategy.get("etf_flow_7d_musd"), 1),
+        "mstr_mnav": _round(strategy.get("mnav"), 4),
+        "mstr_prem_pct": _round(strategy.get("prem_pct"), 2),
+        "strategy_btc": _round(strategy.get("holdings"), 0),
+        "strategy_btc_qtd": _round(strategy.get("qtd_acquired"), 0),
+        "strategy_sold_qtd": _round(strategy.get("sold_qtd"), 0),
+        "strategy_etf_btc": _round(strategy.get("etf_btc_held"), 0),
+        "strategy_exchange_btc": _round(strategy.get("exchange_supply"), 0),
     }
+    if ibit.get("errors"):
+        errors.extend(ibit["errors"])
     changes = {
         "jgb_40y_bps": _round(_bps(jgb_latest.get("jgb_40y"), jgb_prev_40), 2),
         "ust_30y_bps": _round(_bps(ust_latest.get("ust_30y"), ust_prev_30), 2),
@@ -496,6 +729,10 @@ def build_snapshot(backfill_days: int = 0) -> dict[str, Any]:
         "btc_pct": _round(btc.get("pct"), 3),
         "dxy_pct": _round(dxy.get("pct"), 3),
         "usd_jpy_pct": _round(usd_jpy.get("pct"), 3),
+        "exchange_btc_chg": reserves.get("daily_chg"),
+        "exchange_net_flow": reserves.get("net_flow"),
+        "mstr_mnav_chg_pct": _round(strategy.get("mnav_chg_pct"), 2),
+        "ibit_flow_musd": _round((ibit.get("latest") or {}).get("ibit_flow_musd"), 2),
     }
 
     snapshot = {
@@ -504,6 +741,9 @@ def build_snapshot(backfill_days: int = 0) -> dict[str, Any]:
         "quotes": quotes,
         "changes": changes,
         "auctions": auctions or {},
+        "strategy": strategy or {},
+        "exchange_reserves": {k: v for k, v in (reserves or {}).items() if k != "history"},
+        "ibit": {k: v for k, v in (ibit or {}).items() if k != "history"},
         "sources": sources,
         "errors": errors,
         "series": {
@@ -513,6 +753,8 @@ def build_snapshot(backfill_days: int = 0) -> dict[str, Any]:
             "dxy": dxy.get("history") or [],
             "gold": gold.get("history") or [],
             "btc": btc.get("history") or [],
+            "exchange_btc": reserves.get("history") or [],
+            "ibit_flow": ibit.get("history") or [],
         },
     }
     return snapshot
@@ -562,6 +804,15 @@ def upsert_history(snapshot: dict[str, Any], phase: int | None = None) -> None:
         "auction_tail_bps": (latest_30 or {}).get("tail_bps"),
         "auction_date": (latest_30 or {}).get("auction_date"),
         "avg_btc_3": a.get("avg_btc_3"),
+        "exchange_btc": q.get("exchange_btc"),
+        "exchange_btc_chg": c.get("exchange_btc_chg"),
+        "ibit_flow_musd": q.get("ibit_flow_musd"),
+        "etf_flow_7d_musd": q.get("etf_flow_7d_musd"),
+        "mstr_mnav": q.get("mstr_mnav"),
+        "mstr_prem_pct": q.get("mstr_prem_pct"),
+        "strategy_btc": q.get("strategy_btc"),
+        "strategy_btc_qtd": q.get("strategy_btc_qtd"),
+        "strategy_sold_qtd": q.get("strategy_sold_qtd"),
         "phase": phase if phase is not None else "",
     }
     existing = read_history()
@@ -587,6 +838,8 @@ def backfill_history(snapshot: dict[str, Any], days: int = 90) -> None:
         "dxy": _history_map(series.get("dxy") or [], "close"),
         "gold": _history_map(series.get("gold") or [], "close"),
         "btc": _history_map(series.get("btc") or [], "close"),
+        "exchange_btc": _history_map(series.get("exchange_btc") or [], "exchange_btc"),
+        "ibit_flow_musd": _history_map(series.get("ibit_flow") or [], "ibit_flow_musd"),
     }
     dates = sorted({d for m in maps.values() for d in m})
     if not dates:
@@ -629,6 +882,38 @@ def backfill_history(snapshot: dict[str, Any], days: int = 90) -> None:
         writer.writerows(ordered)
 
 
+def merge_plumbing_history(snapshot: dict[str, Any]) -> None:
+    """Fill exchange-reserve and IBIT-flow columns from the series we already fetched."""
+    series = snapshot.get("series") or {}
+    exch = _history_map(series.get("exchange_btc") or [], "exchange_btc")
+    ibit = _history_map(series.get("ibit_flow") or [], "ibit_flow_musd")
+    if not exch and not ibit:
+        return
+    existing = {r["date"]: r for r in read_history() if r.get("date")}
+    for day, val in exch.items():
+        rec = existing.setdefault(day, {k: "" for k in HISTORY_FIELDS})
+        rec["date"] = day
+        rec["exchange_btc"] = _fmt_csv(_round(val, 1))
+    for day, val in ibit.items():
+        rec = existing.setdefault(day, {k: "" for k in HISTORY_FIELDS})
+        rec["date"] = day
+        rec["ibit_flow_musd"] = _fmt_csv(_round(val, 2))
+    ordered = sorted(existing.values(), key=lambda r: r["date"])
+    prev_ex = None
+    for rec in ordered:
+        cur = _f(rec.get("exchange_btc"))
+        if cur is not None and prev_ex is not None:
+            rec["exchange_btc_chg"] = _fmt_csv(_round(cur - prev_ex, 1))
+        if cur is not None:
+            prev_ex = cur
+    # Re-apply today's snapshot so plumbing overlay cannot clobber the live print.
+    with HISTORY_PATH.open("w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=HISTORY_FIELDS, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(ordered)
+    upsert_history(snapshot)
+
+
 def save_snapshot(snapshot: dict[str, Any]) -> None:
     slim = {k: v for k, v in snapshot.items() if k != "series"}
     SNAPSHOT_PATH.write_text(json.dumps(slim, indent=2), encoding="utf-8")
@@ -659,6 +944,20 @@ def print_snapshot(snapshot: dict[str, Any]) -> None:
     line("Gold", q.get("gold"), "", c.get("gold_pct"), "%")
     line("BTC", q.get("btc"), "", c.get("btc_pct"), "%")
     line("BTC/gold", q.get("btc_gold_oz"), " oz")
+    line("Exch. BTC", q.get("exchange_btc"), "", c.get("exchange_btc_chg"), " BTC")
+    ibit_flow = q.get("ibit_flow_musd")
+    line("IBIT flow", ibit_flow, " $m" if ibit_flow is not None else "")
+    line("US ETF 7d", q.get("etf_flow_7d_musd"), " $m")
+    mnav = q.get("mstr_mnav")
+    prem = q.get("mstr_prem_pct")
+    extra = f"  ({'+' if prem and prem > 0 else ''}{prem}%)" if prem is not None else ""
+    if mnav is not None:
+        print(f"  {'MSTR mNAV':<18} {mnav}x{extra}")
+    line("Strategy BTC", q.get("strategy_btc"), "")
+    qtd = q.get("strategy_btc_qtd")
+    if qtd is not None:
+        label = "sold QTD" if qtd < 0 else "acquired QTD"
+        print(f"  {'Strategy QTD':<18} {qtd:,.0f} BTC  ({label})")
     latest_30 = a.get("latest_30y") or {}
     if latest_30:
         print(
@@ -702,7 +1001,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         jgb_hist_days, do_backfill = 0, False
 
-    print("Pulling JGB, UST, FX, gold, BTC, auctions...")
+    print("Pulling JGB, UST, FX, gold, BTC, auctions, Strategy, exchange reserves, IBIT...")
     snapshot = build_snapshot(backfill_days=jgb_hist_days)
     print_snapshot(snapshot)
 
@@ -715,6 +1014,7 @@ def main(argv: list[str] | None = None) -> int:
         backfill_history(snapshot, days=jgb_hist_days or 90)
     else:
         upsert_history(snapshot)
+    merge_plumbing_history(snapshot)
 
     if args.pull_only:
         return 1 if snapshot.get("errors") else 0

@@ -26,6 +26,11 @@ Do this once a week, same day, same sitting. Fifteen minutes.
 - [TreasuryDirect upcoming](https://www.treasurydirect.gov/auctions/upcoming/)
 - Cross-check the dashboard "Upcoming" table. A 10-year or 30-year on a week when JGB 40Y is ripping is the session that matters.
 
+## 6. BTC plumbing
+- [Glassnode exchange balance](https://studio.glassnode.com/metrics?a=BTC&m=distribution.BalanceExchanges) / [CryptoQuant exchange reserve](https://cryptoquant.com/asset/btc/chart/exchange-flows/exchange-reserve)
+- [SoSoValue US BTC ETF](https://sosovalue.com/assets/etf/us-btc-spot) / [Farside IBIT](https://farside.co.uk/BTC/)
+- [Strategy ledger](https://www.strategy.com/ledger) — mNAV and QTD BTC acquired. Negative QTD means they sold.
+
 ## How to read a print
 | Print | Soft | Danger | Fail |
 |---|---|---|---|

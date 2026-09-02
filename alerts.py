@@ -242,6 +242,51 @@ def evaluate(snapshot: dict[str, Any], thresholds: dict[str, Any], history: list
         lambda: f"20-day gold vs BTC return gap {gap:+.1f} pp (widen threshold {widen_cfg['widen_pct']}%)",
         gap,
     )
+
+    # --- BTC plumbing: exchanges, IBIT, Strategy treasury ---
+    exch_cfg = thresholds.get("exchange_btc") or {}
+    ibit_cfg = thresholds.get("ibit_flow_musd") or {}
+    mnav_cfg = thresholds.get("mstr_mnav") or {}
+    sales_cfg = thresholds.get("strategy_sales") or {}
+    exch_chg = _f(c.get("exchange_btc_chg"))
+    ibit_flow = _f(q.get("ibit_flow_musd"))
+    mnav = _f(q.get("mstr_mnav"))
+    sold_qtd = _f(q.get("strategy_sold_qtd"))
+    qtd_acq = _f(q.get("strategy_btc_qtd"))
+    add(
+        exch_chg is not None and exch_chg >= exch_cfg.get("watch_inflow", 10000),
+        2 if (exch_chg or 0) >= exch_cfg.get("alert_inflow", 25000) else 1,
+        "exchange_inflow",
+        lambda: f"Exchange BTC reserves +{exch_chg:,.0f} BTC (coins returning to sell-side wallets)",
+        exch_chg,
+    )
+    add(
+        ibit_flow is not None and ibit_flow <= ibit_cfg.get("watch_outflow", -200),
+        2 if (ibit_flow or 0) <= ibit_cfg.get("alert_outflow", -500) else 1,
+        "ibit_outflow",
+        lambda: f"IBIT daily flow {ibit_flow:+.0f} $m (institutional de-risking)",
+        ibit_flow,
+    )
+    add(
+        mnav is not None and mnav < mnav_cfg.get("discount", 1.0),
+        2 if (mnav or 1) < mnav_cfg.get("unwind", 0.85) else 1,
+        "mstr_discount",
+        lambda: f"MSTR mNAV {mnav:.3f}x — trading at a {((1-mnav)*100):.1f}% discount to BTC NAV (sell-BTC / buyback risk)",
+        mnav,
+    )
+    add(
+        mnav is not None and mnav >= mnav_cfg.get("stretch", 2.5),
+        1, "mstr_stretch",
+        lambda: f"MSTR mNAV {mnav:.2f}x stretched premium — equity issuance is the bid",
+        mnav,
+    )
+    add(
+        sold_qtd is not None and sold_qtd >= sales_cfg.get("watch_btc", 1),
+        2 if (sold_qtd or 0) >= sales_cfg.get("alert_btc", 500) else 1,
+        "strategy_sales",
+        lambda: f"Strategy is a net SELLER this quarter: {sold_qtd:,.0f} BTC (QTD acquired {qtd_acq:+,.0f})",
+        sold_qtd,
+    )
     phase = max((h["phase"] for h in hits), default=0)
     scenario = score_scenarios(snapshot, thresholds, hits)
     return {
@@ -472,6 +517,12 @@ def _self_test() -> int:
     }]
     r4 = evaluate(fail, thresholds, [])
     assert r4["phase"] == 3, r4
+
+    sell = json.loads(json.dumps(base))
+    sell["quotes"]["strategy_sold_qtd"] = 950
+    sell["quotes"]["strategy_btc_qtd"] = -950
+    r5 = evaluate(sell, thresholds, [])
+    assert r5["phase"] == 2, r5
     print("self-test ok")
     return 0
 

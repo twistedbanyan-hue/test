@@ -42,5 +42,22 @@
   },
   "btc_volume_usd": {
     "with_volume": 25000000000
+  },
+  "exchange_btc": {
+    "watch_inflow": 10000,
+    "alert_inflow": 25000
+  },
+  "ibit_flow_musd": {
+    "watch_outflow": -200,
+    "alert_outflow": -500
+  },
+  "mstr_mnav": {
+    "discount": 1.0,
+    "unwind": 0.85,
+    "stretch": 2.5
+  },
+  "strategy_sales": {
+    "watch_btc": 1,
+    "alert_btc": 500
   }
 }
