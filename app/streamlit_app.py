@@ -25,6 +25,17 @@ st.set_page_config(page_title="Portfolio + BlockHorizon", layout="wide")
 def cached_bundle(resolution: str):
     return fetch_bundle(resolution)
 
+@st.cache_data(ttl=60 * 30, show_spinner=False)
+def cached_btc_usd_close_df():
+    """
+    Always pulls BTC-USD close from BlockHorizon so it works without stock data keys.
+    """
+    bundle = fetch_bundle("downsampled_v2")
+    chart_obj = find_chart_in_bundle(bundle, "price")
+    points = extract_first_series_points(chart_obj, prefer="downsampled") if chart_obj else []
+    df = _points_to_df(points).rename(columns={"date": "Date", "value": "Close"})
+    return df
+
 
 @st.cache_data(ttl=60 * 60, show_spinner=False)
 def cached_chart_rows(slugs: List[str]):
@@ -134,7 +145,10 @@ with col1:
         rows = []
         for sym in stock_symbols:
             try:
-                if provider_key == "csv":
+                if sym.upper() in ("BTC-USD", "BTCUSD"):
+                    df = cached_btc_usd_close_df()
+                    df = df.copy()
+                elif provider_key == "csv":
                     if uploaded_df is None or uploaded_df.empty:
                         raise StockDataError("No CSV uploaded.")
                     if "Symbol" not in uploaded_df.columns or "Date" not in uploaded_df.columns or "Close" not in uploaded_df.columns:
@@ -168,7 +182,9 @@ with col1:
 
         sym_to_plot = st.selectbox("Plot stock", options=stock_symbols, index=0)
         try:
-            if provider_key == "csv":
+            if sym_to_plot.upper() in ("BTC-USD", "BTCUSD"):
+                sdf = cached_btc_usd_close_df()
+            elif provider_key == "csv":
                 if uploaded_df is None or uploaded_df.empty:
                     sdf = pd.DataFrame()
                 else:

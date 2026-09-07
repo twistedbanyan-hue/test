@@ -1,10 +1,15 @@
 portfolio:
-  # Add your stock tickers here. For US stocks, Stooq often uses the ".us" suffix.
-  # Examples: AAPL.US, MSFT.US, SPY.US, TSLA.US
+  # Add your stock tickers here (one per line).
+  # Tip: `BTC-USD` is supported via BlockHorizon (no stock API key needed).
   stocks:
-    - AAPL.US
-    - MSFT.US
-    - SPY.US
+    - BTC-USD
+    - MSTR
+    - STRC
+    - SPCX
+    - CBRS
+    - VRT
+    - NVT
+    - NVDA
 
 blockhorizon:
   # BlockHorizon chart slugs to show (BTC on-chain charts).

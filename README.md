@@ -36,6 +36,8 @@ Edit `portfolio.yaml` and put your tickers under `portfolio.stocks`, or paste th
 
 Notes:
 
+- From your Apple Stocks watchlist, examples include: `BTC-USD`, `MSTR`, `STRC`, `SPCX`, `CBRS`, `VRT`, `NVT`, `NVDA`.
+- `BTC-USD` works out of the box (pulled from BlockHorizon).
 - **CSV upload**: upload a CSV with columns `Symbol`, `Date`, `Close` (optional: `Open`, `High`, `Low`, `Volume`).
 - **Alpha Vantage**: set `ALPHAVANTAGE_API_KEY` before running.
 - **Twelve Data**: set `TWELVEDATA_API_KEY` before running.
