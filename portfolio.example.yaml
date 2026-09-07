@@ -1,0 +1,25 @@
+portfolio:
+  # Add your stock tickers here (one per line).
+  # Tip: `BTC-USD` is supported via BlockHorizon (no stock API key needed).
+  stocks:
+    - BTC-USD
+    - MSTR
+    - STRC
+    - SPCX
+    - CBRS
+    - VRT
+    - NVT
+    - NVDA
+
+blockhorizon:
+  # BlockHorizon chart slugs to show (BTC on-chain charts).
+  # Common slugs: price, nupl, percent-supply-in-profit, blockhorizon-index
+  chart_slugs:
+    - price
+    - blockhorizon-index
+    - nupl
+    - percent-supply-in-profit
+
+ui:
+  # Optional: override default date window (days) for line charts.
+  default_window_days: 365
