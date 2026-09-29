@@ -52,6 +52,23 @@ StartupNotify=true
     apps = Path.home() / ".local" / "share" / "applications"
     apps.mkdir(parents=True, exist_ok=True)
     shutil.copy2(desktop, apps / "voice-clone.desktop")
+    if shutil.which("xfconf-query"):
+        subprocess.run(
+            [
+                "xfconf-query",
+                "-c",
+                "xfce4-desktop",
+                "-p",
+                "/desktop-icons/style",
+                "-n",
+                "-t",
+                "int",
+                "-s",
+                "2",
+            ],
+            check=False,
+            capture_output=True,
+        )
     try:
         checksum = subprocess.check_output(["sha256sum", str(desktop)], text=True).split()[0]
         subprocess.run(
