@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Voice Clone</title>
+  <link rel="icon" href="/static/icon.png" />
+  <style>
+    :root {
+      --bg: #101218;
+      --panel: #181c25;
+      --panel-2: #1f2530;
+      --ink: #eef3f1;
+      --muted: #93a09b;
+      --line: #2a3140;
+      --teal: #2ee6c5;
+      --amber: #f0b35a;
+      --danger: #ff7b7b;
+      --shadow: 0 18px 50px rgba(0,0,0,.35);
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; }
+    body {
+      font-family: "Segoe UI", "Avenir Next", ui-sans-serif, system-ui, sans-serif;
+      background:
+        radial-gradient(900px 480px at 10% -10%, rgba(46,230,197,.12), transparent 55%),
+        radial-gradient(700px 400px at 100% 0%, rgba(240,179,90,.1), transparent 50%),
+        var(--bg);
+      color: var(--ink);
+    }
+    header {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 18px 24px 8px;
+    }
+    header img { width: 44px; height: 44px; border-radius: 12px; }
+    header h1 { font-size: 20px; margin: 0; letter-spacing: .01em; }
+    header p { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+    .engine {
+      margin-left: auto;
+      font-size: 12px;
+      color: var(--muted);
+      background: var(--panel);
+      border: 1px solid var(--line);
+      padding: 8px 12px;
+      border-radius: 999px;
+      max-width: 46vw;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .engine.ok { color: var(--teal); }
+    .engine.warn { color: var(--amber); }
+    main {
+      display: grid;
+      grid-template-columns: 360px 1fr;
+      gap: 18px;
+      padding: 12px 24px 28px;
+      min-height: calc(100vh - 76px);
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      box-shadow: var(--shadow);
+      padding: 16px;
+    }
+    h2 { margin: 0 0 12px; font-size: 15px; font-weight: 650; }
+    label { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 6px; }
+    input, select, textarea, button {
+      font: inherit;
+      color: var(--ink);
+    }
+    input, select, textarea {
+      width: 100%;
+      background: var(--panel-2);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 9px 11px;
+    }
+    textarea { min-height: 110px; resize: vertical; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .btn {
+      background: var(--teal);
+      color: #082822;
+      border: 0;
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .btn.secondary { background: #2c3444; color: var(--ink); font-weight: 600; }
+    .btn.ghost { background: transparent; color: var(--muted); border: 1px solid var(--line); }
+    .btn.danger { background: transparent; color: var(--danger); border: 1px solid #5a2d2d; }
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+    .voices { display: flex; flex-direction: column; gap: 8px; max-height: 42vh; overflow: auto; }
+    .voice {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      padding: 10px;
+      background: var(--panel-2);
+      border-radius: 12px;
+      border: 1px solid transparent;
+    }
+    .voice.active { border-color: var(--teal); }
+    .voice b { display: block; }
+    .voice span { color: var(--muted); font-size: 12px; }
+    .voice-btns { display: flex; gap: 6px; align-items: start; }
+    .line {
+      display: grid;
+      grid-template-columns: 160px 1fr auto;
+      gap: 8px;
+      margin-bottom: 8px;
+      align-items: start;
+    }
+    .line textarea { min-height: 58px; }
+    .hint { color: var(--muted); font-size: 12px; line-height: 1.45; }
+    .error { color: var(--danger); font-size: 13px; min-height: 1.2em; }
+    audio { width: 100%; margin-top: 12px; }
+    .toggles { display: flex; gap: 8px; margin-bottom: 12px; }
+    .toggle {
+      border: 1px solid var(--line);
+      background: transparent;
+      border-radius: 999px;
+      padding: 6px 12px;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .toggle.on { background: #16352f; color: var(--teal); border-color: #1d5c50; }
+    @media (max-width: 900px) {
+      main { grid-template-columns: 1fr; }
+      .line { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <img src="/static/icon.png" alt="Voice Clone" />
+    <div>
+      <h1>Voice Clone</h1>
+      <p>Keep each person’s clip as a WAV. Mix them in a conversation.</p>
+    </div>
+    <div id="engine" class="engine">Starting…</div>
+  </header>
+  <main>
+    <section class="card">
+      <h2>Voice library</h2>
+      <p class="hint">Drop a video or audio file, cut a clean 10–20s of one speaker, and label them. That WAV is the voice you own.</p>
+      <label>Name</label>
+      <input id="name" placeholder="Alex" />
+      <label>Video or audio</label>
+      <input id="file" type="file" accept="audio/*,video/*" />
+      <div class="row">
+        <div>
+          <label>Start (seconds)</label>
+          <input id="start" type="number" min="0" step="0.1" value="0" />
+        </div>
+        <div>
+          <label>Length (seconds, max 40)</label>
+          <input id="duration" type="number" min="1" max="40" step="0.5" value="15" />
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn" id="add-voice">Save voice</button>
+      </div>
+      <p class="error" id="voice-error"></p>
+      <div class="voices" id="voices"></div>
+    </section>
+
+    <section class="card">
+      <h2>Conversation</h2>
+      <div class="toggles">
+        <button class="toggle on" id="tab-lines" type="button">Line by line</button>
+        <button class="toggle" id="tab-script" type="button">Paste script</button>
+      </div>
+      <div id="lines-ui">
+        <div id="lines"></div>
+        <div class="actions">
+          <button class="btn secondary" id="add-line" type="button">Add speaker line</button>
+        </div>
+      </div>
+      <div id="script-ui" hidden>
+        <label>Script (Name: words)</label>
+        <textarea id="script" placeholder="Alex: Did you hear that?&#10;Jordan: Yeah. Say it again.&#10;Alex: We keep these voices on disk."></textarea>
+        <div class="actions">
+          <button class="btn secondary" id="parse-script" type="button">Load into lines</button>
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label>Energy / exaggeration</label>
+          <input id="exaggeration" type="range" min="0.2" max="0.9" step="0.05" value="0.5" />
+        </div>
+        <div>
+          <label>Pause between speakers (ms)</label>
+          <input id="pause" type="number" min="0" max="2000" step="50" value="350" />
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn" id="generate" type="button">Generate conversation</button>
+        <button class="btn ghost" id="speak-one" type="button">Read selected voice only</button>
+      </div>
+      <p class="hint" id="one-hint">Selected-voice read uses the first line’s text.</p>
+      <p class="error" id="conv-error"></p>
+      <audio id="player" controls></audio>
+    </section>
+  </main>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let voices = [];
+    let selected = null;
+    let mode = "lines";
+
+    async function api(path, opts) {
+      const res = await fetch(path, opts);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || data.error || res.statusText);
+      return data;
+    }
+
+    function speakerSelect(value) {
+      const sel = document.createElement("select");
+      voices.forEach((v) => {
+        const opt = document.createElement("option");
+        opt.value = v.id;
+        opt.textContent = v.name;
+        sel.appendChild(opt);
+      });
+      if (value) sel.value = value;
+      return sel;
+    }
+
+    function addLine(voiceId = "", text = "") {
+      const wrap = document.createElement("div");
+      wrap.className = "line";
+      const sel = speakerSelect(voiceId || (voices[0] && voices[0].id));
+      const ta = document.createElement("textarea");
+      ta.placeholder = "What this person says";
+      ta.value = text;
+      const rm = document.createElement("button");
+      rm.className = "btn danger";
+      rm.type = "button";
+      rm.textContent = "✕";
+      rm.onclick = () => wrap.remove();
+      wrap.append(sel, ta, rm);
+      $("lines").appendChild(wrap);
+    }
+
+    function renderVoices() {
+      const box = $("voices");
+      box.innerHTML = "";
+      if (!voices.length) {
+        box.innerHTML = '<p class="hint">No voices yet.</p>';
+        return;
+      }
+      voices.forEach((v) => {
+        const el = document.createElement("div");
+        el.className = "voice" + (selected === v.id ? " active" : "");
+        el.innerHTML = `<div><b>${v.name}</b><span>${v.duration}s · ${v.id}</span></div>`;
+        const btns = document.createElement("div");
+        btns.className = "voice-btns";
+        const play = document.createElement("button");
+        play.className = "btn secondary";
+        play.textContent = "Play";
+        play.onclick = (e) => {
+          e.stopPropagation();
+          $("player").src = `/api/voices/${v.id}/clip`;
+          $("player").play();
+        };
+        const del = document.createElement("button");
+        del.className = "btn danger";
+        del.textContent = "Del";
+        del.onclick = async (e) => {
+          e.stopPropagation();
+          await api(`/api/voices/${v.id}`, { method: "DELETE" });
+          if (selected === v.id) selected = null;
+          await refresh();
+        };
+        btns.append(play, del);
+        el.appendChild(btns);
+        el.onclick = () => { selected = v.id; renderVoices(); };
+        box.appendChild(el);
+      });
+      document.querySelectorAll("#lines select").forEach((sel) => {
+        const current = sel.value;
+        sel.innerHTML = "";
+        voices.forEach((v) => {
+          const opt = document.createElement("option");
+          opt.value = v.id;
+          opt.textContent = v.name;
+          sel.appendChild(opt);
+        });
+        if ([...sel.options].some((o) => o.value === current)) sel.value = current;
+      });
+    }
+
+    async function refresh() {
+      const status = await api("/api/status");
+      const engine = $("engine");
+      engine.textContent = status.engine || status.error || "No engine";
+      engine.className = "engine " + (status.cloning ? "ok" : "warn");
+      voices = (await api("/api/voices")).voices || [];
+      renderVoices();
+      if (!$("lines").children.length && voices.length) {
+        addLine(voices[0].id, "");
+        if (voices[1]) addLine(voices[1].id, "");
+      }
+    }
+
+    $("add-voice").onclick = async () => {
+      $("voice-error").textContent = "";
+      const file = $("file").files[0];
+      if (!file) { $("voice-error").textContent = "Choose a video or audio file."; return; }
+      const body = new FormData();
+      body.append("name", $("name").value || file.name);
+      body.append("start", $("start").value || "0");
+      body.append("duration", $("duration").value || "15");
+      body.append("file", file);
+      try {
+        const voice = await api("/api/voices", { method: "POST", body });
+        selected = voice.id;
+        $("name").value = "";
+        $("file").value = "";
+        await refresh();
+      } catch (err) {
+        $("voice-error").textContent = err.message;
+      }
+    };
+
+    $("add-line").onclick = () => addLine();
+    $("tab-lines").onclick = () => {
+      mode = "lines";
+      $("tab-lines").classList.add("on");
+      $("tab-script").classList.remove("on");
+      $("lines-ui").hidden = false;
+      $("script-ui").hidden = true;
+    };
+    $("tab-script").onclick = () => {
+      mode = "script";
+      $("tab-script").classList.add("on");
+      $("tab-lines").classList.remove("on");
+      $("lines-ui").hidden = true;
+      $("script-ui").hidden = false;
+    };
+
+    $("parse-script").onclick = async () => {
+      $("conv-error").textContent = "";
+      try {
+        const data = await api("/api/script", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ script: $("script").value }),
+        });
+        if (data.missing?.length) {
+          $("conv-error").textContent = "Unknown speakers: " + data.missing.join(", ") + ". Save those voices first.";
+        }
+        $("lines").innerHTML = "";
+        data.lines.forEach((line) => addLine(line.voice_id, line.text));
+        $("tab-lines").click();
+      } catch (err) {
+        $("conv-error").textContent = err.message;
+      }
+    };
+
+    function collectLines() {
+      return [...$("lines").children].map((row) => ({
+        voice_id: row.querySelector("select").value,
+        text: row.querySelector("textarea").value,
+      })).filter((line) => line.text.trim());
+    }
+
+    $("generate").onclick = async () => {
+      $("conv-error").textContent = "";
+      try {
+        const data = await api("/api/conversation", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            lines: collectLines(),
+            pause_ms: Number($("pause").value || 350),
+            exaggeration: Number($("exaggeration").value || 0.5),
+            cfg: 0.5,
+          }),
+        });
+        $("player").src = `/api/outputs/${data.file}`;
+        $("player").play();
+      } catch (err) {
+        $("conv-error").textContent = err.message;
+      }
+    };
+
+    $("speak-one").onclick = async () => {
+      $("conv-error").textContent = "";
+      const voiceId = selected || (voices[0] && voices[0].id);
+      const first = collectLines()[0];
+      if (!voiceId || !first) {
+        $("conv-error").textContent = "Select a voice and enter a line of text.";
+        return;
+      }
+      try {
+        const data = await api(`/api/voices/${voiceId}/speak`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            text: first.text,
+            exaggeration: Number($("exaggeration").value || 0.5),
+            cfg: 0.5,
+          }),
+        });
+        $("player").src = `/api/outputs/${data.file}`;
+        $("player").play();
+      } catch (err) {
+        $("conv-error").textContent = err.message;
+      }
+    };
+
+    refresh().catch((err) => { $("engine").textContent = err.message; });
+  </script>
+</body>
+</html>
